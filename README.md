@@ -12,7 +12,7 @@
 
 <br />
 
-`patrolbot` is a **focused autonomous patrol system** for the **Adeept PiCar platform**, derived from the patrolbot project and streamlined into a single purpose:
+`patrolbot` is a **focused autonomous patrol system** for the **Adeept PiCar platform**, streamlined into a single purpose:
 
 > **Drive, patrol, avoid obstacles, and stay alive.**
 
