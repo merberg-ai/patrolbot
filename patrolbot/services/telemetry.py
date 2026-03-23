@@ -37,7 +37,18 @@ class TelemetryService:
         battery_voltage = reg.battery.read_voltage() if reg.battery else None
         battery_status = reg.battery.get_status(battery_voltage) if reg.battery else 'unknown'
         battery_percent = reg.battery.estimate_percent(battery_voltage) if reg.battery else None
-        distance_cm = reg.ultrasonic.read_cm() if reg.ultrasonic else None
+
+        distance_cm = None
+        if reg.ultrasonic:
+            try:
+                distance_cm = reg.ultrasonic.read_cm()
+            except AttributeError:
+                try:
+                    distance_cm = reg.ultrasonic.measure_distance_cm()
+                except Exception:
+                    distance_cm = None
+            except Exception:
+                distance_cm = None
 
         steering_angle = getattr(reg.steering, 'angle', state.steering_angle) if reg.steering else state.steering_angle
         pan_angle = getattr(reg.camera_servo, 'pan_angle', state.pan_angle) if reg.camera_servo else state.pan_angle
@@ -84,28 +95,25 @@ class TelemetryService:
             'led_state': state.led_state,
             'led_custom': state.led_custom,
             'mode': state.mode,
-            'tracking_enabled': state.tracking_enabled,
-            'tracking': {
-                'enabled': state.tracking_enabled,
-                'mode': state.tracking_mode,
-                'detector': state.tracking_detector,
-                'detector_status': state.tracking_detector_status,
-                'detector_available': state.tracking_detector_available,
-                'target_acquired': state.tracking_target_acquired,
-                'target_box': state.tracking_box,
-                'target_label': state.tracking_target_label,
-                'target_confidence': state.tracking_target_confidence,
-                'scan_active': state.tracking_scan_active,
-                'frame_size': state.tracking_frame_size,
-                'fps_actual': state.tracking_fps_actual,
-                'metrics': state.tracking_metrics,
-                'disable_reason': state.tracking_disable_reason,
+            'patrol_enabled': state.patrol_enabled,
+            'patrol': {
+                'enabled': state.patrol_enabled,
+                'mode': state.patrol_mode,
+                'drive_state': state.patrol_drive_state,
+                'speed': state.patrol_speed,
+                'targets': state.patrol_targets,
+                'detect_count': state.patrol_detect_count,
+                'last_detected': state.patrol_last_detected,
+                'metrics': state.patrol_metrics,
+                'disable_reason': state.patrol_disable_reason,
+                'last_error': state.patrol_last_error,
             },
-            'gamepad_connected': bool(getattr(self.runtime, 'gamepad', None) and getattr(self.runtime.gamepad, 'device', None) is not None),
-
+            'gamepad_connected': False,
         }
         state.telemetry = snapshot
         return snapshot
 
     def get_snapshot(self) -> dict:
-        return self.poll_once()
+        if not self.runtime.state.telemetry:
+            return self.poll_once()
+        return dict(self.runtime.state.telemetry)

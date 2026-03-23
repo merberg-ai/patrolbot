@@ -290,37 +290,9 @@ class CameraWrapper:
 
             frame = self.get_frame()
             if frame:
-                # Draw tracking overlay if enabled and a detected box exists
-                if _cv_ok and runtime is not None:
-                    state = runtime.state
-                    box = getattr(state, 'tracking_box', None)
-                    if getattr(state, 'tracking_enabled', False) and box is not None:
-                        try:
-                            np_arr = _np.frombuffer(frame, _np.uint8)
-                            img = _cv2.imdecode(np_arr, _cv2.IMREAD_COLOR)
-                            if img is not None:
-                                x, y, w, h = box
-                                detector = getattr(state, 'tracking_detector', '')
-                                label_map = {
-                                    'haar_face': 'Face',
-                                    'haar_body': 'Body',
-                                    'motion': 'Motion',
-                                }
-                                label = label_map.get(detector, 'Target')
-                                # Cyan bounding box + label
-                                _cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 204), 2)
-                                _cv2.putText(
-                                    img, label,
-                                    (x, max(y - 8, 12)),
-                                    _cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                                    (0, 255, 204), 2, _cv2.LINE_AA,
-                                )
-                                ok, buf = _cv2.imencode('.jpg', img, [_cv2.IMWRITE_JPEG_QUALITY, 85])
-                                if ok:
-                                    frame = buf.tobytes()
-                        except Exception:
-                            pass  # never crash the stream on overlay failure
-
+                # Phase 1 patrolbot keeps the camera feed clean and avoids any
+                # dependency on removed tracking state. Leave room for future
+                # patrol overlays here once the patrol UI grows up a bit.
                 yield (
                     b'--frame\r\n'
                     b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n'
