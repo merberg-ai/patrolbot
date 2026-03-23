@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div style="display:flex; flex-direction:column; gap:14px;">
+
+  <div class="card" id="debug-status-card">
+    <div class="card-header">
+      <span>Controller Debug</span>
+      <span id="conn-badge" class="status-pill" style="color:var(--muted); border-color:rgba(255,255,255,0.12);">DISCONNECTED</span>
+    </div>
+    <p class="muted" style="margin:0 0 14px; font-size:0.85rem;">
+      Live raw axis values and servo targets from the <code>GamepadService</code>. Updates at 10Hz when connected.
+    </p>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+      <div>
+        <div style="font-size:0.7rem; color:var(--accent); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:8px;">Raw Axis State</div>
+        <div style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; height:240px; overflow-y:auto; padding:12px;">
+          <pre id="axis-out" style="font-family:monospace; font-size:0.78rem; color:var(--accent); margin:0; white-space:pre-wrap;">Awaiting data...</pre>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.7rem; color:#ffb347; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:8px;">Service State</div>
+        <div style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; height:240px; overflow-y:auto; padding:12px;">
+          <pre id="svc-out" style="font-family:monospace; font-size:0.78rem; color:#ffb347; margin:0; white-space:pre-wrap;">Awaiting data...</pre>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;">
+      <div>
+        <div style="font-size:0.7rem; color:var(--accent); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:8px;">Detected Axes / Buttons</div>
+        <div style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; min-height:180px; padding:12px;">
+          <pre id="caps-out" style="font-family:monospace; font-size:0.78rem; color:var(--accent); margin:0; white-space:pre-wrap;">Awaiting data...</pre>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:0.7rem; color:#ffb347; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:8px;">Device Selection Scan</div>
+        <div style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; min-height:180px; padding:12px;">
+          <pre id="scan-out" style="font-family:monospace; font-size:0.78rem; color:#ffb347; margin:0; white-space:pre-wrap;">Awaiting data...</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:10px;">
+    <a href="/controller/map" style="flex:1; display:block; padding:12px; border:1px solid var(--accent); border-radius:10px; text-align:center; color:var(--accent); font-weight:700; font-size:0.82rem; letter-spacing:0.08em;">Configure Mapping</a>
+    <a href="/controller" style="flex:1; display:block; padding:12px; border:1px solid var(--border); border-radius:10px; text-align:center; color:var(--muted); font-weight:700; font-size:0.82rem; letter-spacing:0.08em;">Back to Controller</a>
+  </div>
+
+</div>
+
+<script>
+  async function pollDebug() {
+    try {
+      const d = await fetch('/api/bluetooth/debug').then(r => r.json());
+      const badge = document.getElementById('conn-badge');
+      const card = document.getElementById('debug-status-card');
+
+      if (d.ok && d.connected) {
+        badge.textContent = `CONNECTED: ${d.device_name}`;
+        badge.style.color = 'var(--accent)';
+        badge.style.borderColor = 'rgba(0,255,204,0.4)';
+        card.style.borderColor = 'rgba(0,255,204,0.2)';
+
+        document.getElementById('axis-out').textContent = JSON.stringify(d.axis_state, null, 2);
+        document.getElementById('svc-out').textContent =
+          `Steer Target:   ${d.steer_target}\nPan Target:     ${d.pan_target}\nTilt Target:    ${d.tilt_target}\nLast Motor Cmd: ${JSON.stringify(d.last_motor_cmd)}`;
+      } else {
+        badge.textContent = 'DISCONNECTED';
+        badge.style.color = 'var(--muted)';
+        badge.style.borderColor = 'rgba(255,255,255,0.12)';
+        card.style.borderColor = 'var(--border)';
+        document.getElementById('axis-out').textContent = 'No gamepad connected.';
+        document.getElementById('svc-out').textContent = 'No gamepad connected.';
+        document.getElementById('caps-out').textContent = JSON.stringify({
+          available_axes: d.available_axes || [],
+          available_buttons: d.available_buttons || [],
+          axis_info: d.axis_info || {}
+        }, null, 2);
+        document.getElementById('scan-out').textContent = JSON.stringify(d.last_device_scan || [], null, 2);
+      }
+    } catch(e) { console.error(e); }
+    setTimeout(pollDebug, 100);
+  }
+
+  document.addEventListener('DOMContentLoaded', pollDebug);
+</script>
+{% endblock %}

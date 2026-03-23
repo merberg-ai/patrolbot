@@ -1,0 +1,117 @@
+web:
+  host: 0.0.0.0
+  port: 8080
+  debug: false
+logging:
+  file: logs/patrolbot.log
+lights:
+  enabled: true
+  left_pins:
+    r: 13
+    g: 19
+    b: 0
+  right_pins:
+    r: 1
+    g: 5
+    b: 6
+  critical_blink_interval_s: 0.5
+  colors:
+    false: [0, 0, 0]
+    booting: [255, 180, 0]
+    ready: [0, 255, 0]
+    error: [255, 0, 0]
+    battery_critical: [255, 0, 0]
+    police_blue: [0, 0, 255]
+  police_interval_s: 0.25
+servo:
+  driver:
+    address: 95
+    frequency: 50
+    min_pulse_us: 500
+    max_pulse_us: 2500
+  steering:
+    channel: 0
+    center: 90
+    trim: 0
+    min_angle: 45
+    max_angle: 135
+    step: 10
+    invert: true
+  camera_pan:
+    channel: 1
+    center: 90
+    trim: 0
+    min_angle: 40
+    max_angle: 140
+    step: 10
+    invert: true
+  camera_tilt:
+    channel: 2
+    center: 90
+    trim: 0
+    min_angle: 40
+    max_angle: 140
+    step: 10
+    invert: true
+ultrasonic:
+  trigger_pin: 23
+  echo_pin: 24
+  max_distance_m: 2.0
+  samples: 3
+  sample_delay_s: 0.02
+  offset_cm: 0.0
+battery:
+  low_voltage: 6.8
+  critical_voltage: 6.4
+  bus: 1
+  address: 72
+  channel: 0
+  command: 132
+  adc_vref: 4.93
+  divider_r_high: 3000
+  divider_r_low: 1000
+  samples: 7
+  sample_delay_s: 0.01
+  offset: 0.0
+  full_voltage: 8.4
+telemetry:
+  poll_interval_s: 2.0
+switches:
+  pins: [9, 25, 11]
+motors:
+  backend: auto
+  helper_lib_path: ''
+  channels: [1, 2, 3, 4]
+  invert_channels: []
+  reverse_drive: true
+  address: 95
+  frequency: 50
+  default_speed: 40
+  command_timeout_s: 0.75
+  left_invert: false
+  right_invert: true
+camera:
+  width: 640
+  height: 480
+  fps: 20
+  rotation: 0
+  awb_mode: auto
+  brightness: 0.0
+  contrast: 1.0
+  saturation: 1.0
+  sharpness: 1.0
+  exposure_compensation: 0.0
+  manual_red_gain: null
+  manual_blue_gain: null
+patrol:
+  enabled: false
+  speed: 35
+  reverse_speed: 28
+  avoidance_distance_cm: 30
+  reverse_time_sec: 0.8
+  turn_time_sec: 0.9
+  turn_mode: alternate
+  scan_pan_min: 45
+  scan_pan_max: 135
+  scan_step: 2
+  scan_tilt_angle: 90

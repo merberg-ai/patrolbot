@@ -1,0 +1,1 @@
+button[data-danger='true']{border-color:var(--danger)}.good{color:var(--ok)}.bad{color:var(--danger)}

@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class='card'>
+  <h2>Control</h2>
+  <p>Drive + steer + camera control. Hold Forward/Backward to move. Release to let the timeout stop motion.</p>
+</section>
+
+<section class='card'>
+  <h3>Live Camera</h3>
+  <img
+    id='control-camera-stream'
+    class='camera-stream'
+    src='/video_feed?view=control'
+    alt='patrolbot camera stream'
+  >
+  <p id='control-camera-note' class='muted'>Live camera feed</p>
+</section>
+
+<section class='card'>
+  <h3>Drive</h3>
+  <label for='drive-speed'>Drive Speed: <strong id='drive-speed-label'>40%</strong></label>
+  <input id='drive-speed' type='range' min='10' max='100' step='5' value='40' style='width:100%;'>
+  <div class='button-grid'>
+    <button data-action='motor-forward-hold'>Forward</button>
+    <button data-action='motor-stop'>Stop</button>
+    <button data-action='motor-backward-hold'>Backward</button>
+    <button data-action='motor-clear-estop'>Clear E-STOP</button>
+  </div>
+</section>
+
+<section class='card'>
+  <h3>Steering</h3>
+  <div class='button-grid'>
+    <button data-action='steering-left'>Steer Left</button>
+    <button data-action='steering-center'>Center</button>
+    <button data-action='steering-right'>Steer Right</button>
+  </div>
+</section>
+
+<section class='card'>
+  <h3>Camera Pan / Tilt</h3>
+  <div class='button-grid'>
+    <button data-action='camera-pan-left'>Pan Left</button>
+    <button data-action='camera-pan-right'>Pan Right</button>
+    <button data-action='camera-tilt-up'>Tilt Up</button>
+    <button data-action='camera-tilt-down'>Tilt Down</button>
+    <button data-action='camera-home'>Camera Home</button>
+    <button data-action='stop-all' class='danger'>Emergency Stop</button>
+  </div>
+</section>
+{% endblock %}

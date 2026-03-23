@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Patrol Console</h2></div>
+  <p class='muted'>Patrolbot 1.0 is a stripped-down autonomous patrol build. No gamepad circus, no tracking lab, just patrol logic, sensors, camera, and survival instincts.</p>
+  <div class='button-grid'>
+    <button id='patrol-enable' class='primary'>Start Patrol</button>
+    <button id='patrol-disable'>Stop Patrol</button>
+    <button id='patrol-clear-estop'>Clear E-Stop</button>
+  </div>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h3 style='margin:0;'>Live Status</h3></div>
+  <div class='status-grid'>
+    <div><span>Enabled</span><strong id='patrol-enabled'>--</strong></div>
+    <div><span>Drive State</span><strong id='patrol-drive-state'>--</strong></div>
+    <div><span>Front Distance</span><strong id='patrol-distance'>--</strong></div>
+    <div><span>Obstacle Count</span><strong id='patrol-obstacles'>--</strong></div>
+    <div><span>Last Turn</span><strong id='patrol-last-turn'>--</strong></div>
+    <div><span>Loop Rate</span><strong id='patrol-loop-hz'>--</strong></div>
+    <div><span>Disable Reason</span><strong id='patrol-disable-reason'>--</strong></div>
+    <div><span>Last Error</span><strong id='patrol-last-error'>--</strong></div>
+  </div>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h3 style='margin:0;'>Patrol Camera</h3></div>
+  <img id='patrol-camera-preview' class='camera-stream' src='/video_feed?view=patrol' alt='Patrol camera feed'>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h3 style='margin:0;'>Patrol Tuning</h3></div>
+  <div class='status-grid'>
+    <div><span>Forward Speed (%)</span><input id='patrol-speed' type='number' min='0' max='100' step='1'></div>
+    <div><span>Reverse Speed (%)</span><input id='patrol-reverse-speed' type='number' min='0' max='100' step='1'></div>
+    <div><span>Avoid Distance (cm)</span><input id='patrol-avoid-distance' type='number' min='5' max='200' step='1'></div>
+    <div><span>Reverse Time (s)</span><input id='patrol-reverse-time' type='number' min='0' max='5' step='0.1'></div>
+    <div><span>Turn Time (s)</span><input id='patrol-turn-time' type='number' min='0.1' max='5' step='0.1'></div>
+    <div><span>Turn Mode</span>
+      <select id='patrol-turn-mode'>
+        <option value='alternate'>Alternate</option>
+        <option value='random'>Random</option>
+        <option value='left'>Always Left</option>
+        <option value='right'>Always Right</option>
+      </select>
+    </div>
+    <div><span>Scan Pan Min</span><input id='patrol-pan-min' type='number' min='0' max='180' step='1'></div>
+    <div><span>Scan Pan Max</span><input id='patrol-pan-max' type='number' min='0' max='180' step='1'></div>
+    <div><span>Scan Step</span><input id='patrol-scan-step' type='number' min='1' max='30' step='1'></div>
+    <div><span>Scan Tilt</span><input id='patrol-scan-tilt' type='number' min='0' max='180' step='1'></div>
+  </div>
+  <div class='button-grid'>
+    <button id='patrol-save-config' class='primary'>Save Patrol Config</button>
+  </div>
+  <p id='patrol-message' class='muted'>Loading patrol config…</p>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h3 style='margin:0;'>Patrol Notes</h3></div>
+  <pre id='patrol-console' style='margin:0; min-height:180px; max-height:280px; overflow:auto; background:#0b1116; color:#9fffe7; border:1px solid var(--border); border-radius:10px; padding:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.85rem; white-space:pre-wrap;'></pre>
+</section>
+{% endblock %}

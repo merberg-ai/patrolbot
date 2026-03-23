@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div style="display:flex; flex-direction:column; gap:14px;">
+
+  <!-- Telemetry Grid -->
+  <div class="card">
+    <div class="card-header">Telemetry</div>
+    <div class="status-grid" style="grid-template-columns: repeat(2, 1fr);">
+      <div>
+        <span>Motor State</span>
+        <strong id='dash-motor-state'>--</strong>
+      </div>
+      <div>
+        <span>Tracking</span>
+        <strong id='dash-tracking'>--</strong>
+      </div>
+      <div>
+        <span>Motor Speed</span>
+        <strong id='dash-motor-speed'>--</strong>
+      </div>
+      <div>
+        <span>Distance</span>
+        <strong id='dash-distance-cm'>--</strong>
+      </div>
+      <div>
+        <span>Steering</span>
+        <strong id='dash-steering-angle'>--</strong>
+      </div>
+      <div>
+        <span>Camera Pan</span>
+        <strong id='dash-pan-angle'>--</strong>
+      </div>
+      <div>
+        <span>Camera Tilt</span>
+        <strong id='dash-tilt-angle'>--</strong>
+      </div>
+      <div>
+        <span>E-STOP</span>
+        <strong id='dash-estop'>--</strong>
+      </div>
+      <div>
+        <span>Motion Lock</span>
+        <strong id='dash-motion-lock'>--</strong>
+      </div>
+      <div>
+        <span>Command Age</span>
+        <strong id='dash-command-age'>--</strong>
+      </div>
+      <div>
+        <span>Timeout</span>
+        <strong id='dash-timeout'>--</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controller Status -->
+  <div class="card" id="dash-gamepad-card">
+    <div class="card-header">
+      <span>Gamepad</span>
+      <span id="dash-gamepad-badge" class="status-pill" style="border-color:rgba(255,255,255,0.15); color:var(--muted);">DISCONNECTED</span>
+    </div>
+    <p id="dash-gamepad-text" class="muted" style="margin:0; font-size:0.85rem;">No controller detected. Pair one on the Controller tab.</p>
+    <div style="margin-top:12px;">
+      <a href="/remote" class="btn-outline-primary" style="display:block; text-align:center; padding:10px; border:1px solid var(--accent); border-radius:10px; font-weight:700; letter-spacing:0.08em; font-size:0.85rem;">Launch HUD &amp; Remote</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  async function dashPoll() {
+    try {
+      const d = await fetch('/api/status').then(r => r.json());
+
+      // Telemetry
+      document.getElementById('dash-motor-state').textContent = d.motor_state ?? '--';
+      document.getElementById('dash-tracking').textContent = d.tracking_enabled ? 'Active' : 'Off';
+      document.getElementById('dash-motor-speed').textContent = d.speed !== null ? d.speed + '%' : '--';
+      document.getElementById('dash-distance-cm').textContent = d.distance_cm !== null ? d.distance_cm.toFixed(1) + ' cm' : '--';
+      document.getElementById('dash-steering-angle').textContent = d.steering_angle !== null ? d.steering_angle + '°' : '--';
+      document.getElementById('dash-pan-angle').textContent = d.pan_angle !== null ? d.pan_angle + '°' : '--';
+      document.getElementById('dash-tilt-angle').textContent = d.tilt_angle !== null ? d.tilt_angle + '°' : '--';
+      document.getElementById('dash-estop').textContent = d.estop_latched ? '⚠ ACTIVE' : 'Clear';
+      document.getElementById('dash-motion-lock').textContent = d.motion_locked ? 'Locked' : 'Free';
+      document.getElementById('dash-command-age').textContent = d.command_age_s !== null ? d.command_age_s.toFixed(1) + 's' : '--';
+      document.getElementById('dash-timeout').textContent = d.motor_timeout_s !== null ? d.motor_timeout_s + 's' : '--';
+
+      // Gamepad
+      const badge = document.getElementById('dash-gamepad-badge');
+      const card = document.getElementById('dash-gamepad-card');
+      const txt = document.getElementById('dash-gamepad-text');
+      if (d.gamepad_connected) {
+        badge.textContent = 'CONNECTED';
+        badge.style.color = 'var(--accent)';
+        badge.style.borderColor = 'rgba(0,255,204,0.4)';
+        txt.textContent = 'Gamepad is active and drive systems are mapped.';
+        card.style.borderColor = 'rgba(0,255,204,0.2)';
+      } else {
+        badge.textContent = 'DISCONNECTED';
+        badge.style.color = 'var(--muted)';
+        badge.style.borderColor = 'rgba(255,255,255,0.12)';
+        txt.textContent = 'No controller detected. Pair one on the Gamepad tab.';
+        card.style.borderColor = 'var(--border)';
+      }
+
+    } catch(e) {}
+    setTimeout(dashPoll, 2000);
+  }
+
+  async function toggleTracking() {
+    try {
+      await fetch('/api/tracking/toggle', {method: 'POST'});
+      dashPoll();
+    } catch(e) {}
+  }
+
+  document.addEventListener('DOMContentLoaded', dashPoll);
+</script>
+{% endblock %}

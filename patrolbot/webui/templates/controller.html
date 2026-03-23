@@ -1,0 +1,190 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div style="display:flex; flex-direction:column; gap:14px;">
+
+  <!-- Power Management -->
+  <div class="card" id="gamepad-power-card">
+    <div class="card-header">Power Management</div>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <span>Gamepad & Bluetooth services</span>
+      <select id="gamepad-enable-select" onchange="toggleGamepadService()" style="width: auto; padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,0.05); color: var(--text); border: 1px solid var(--border);">
+        <option value="true">Enabled</option>
+        <option value="false" style="color: #ff6688;">Disabled (Radio Off)</option>
+      </select>
+    </div>
+    <p class="muted" style="font-size:0.85rem; margin-top:12px; margin-bottom:0;">Disabling this stops the gamepad background watcher and physically powers off the Bluetooth radio (`rfkill block bluetooth`) to conserve battery on the Pi5.</p>
+  </div>
+
+  <!-- Connection Status + Quick Links -->
+  <div class="card" id="gamepad-status-card">
+    <div class="card-header">
+      <span>Controller Status</span>
+      <span id="conn-badge" class="status-pill" style="color:var(--muted); border-color:rgba(255,255,255,0.12);">DISCONNECTED</span>
+    </div>
+    <p id="conn-text" class="muted" style="margin:0 0 14px;">Awaiting connection...</p>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <a href="/controller/map" style="display:block; padding:10px; border:1px solid var(--accent); border-radius:10px; text-align:center; color:var(--accent); font-size:0.82rem; font-weight:700; letter-spacing:0.08em; transition:background 0.15s;"
+         onmouseover="this.style.background='var(--accent-dim)'" onmouseout="this.style.background='transparent'">
+        🎮 Configure Mapping
+      </a>
+      <a href="/controller/debug" style="display:block; padding:10px; border:1px solid rgba(255,255,255,0.12); border-radius:10px; text-align:center; color:var(--muted); font-size:0.82rem; font-weight:700; letter-spacing:0.08em; transition:background 0.15s, color 0.15s, border-color 0.15s;"
+         onmouseover="this.style.color='var(--text)'; this.style.borderColor='rgba(255,255,255,0.25)'"
+         onmouseout="this.style.color='var(--muted)'; this.style.borderColor='rgba(255,255,255,0.12)'">
+        🔍 Debug Inputs
+      </a>
+    </div>
+  </div>
+
+  <!-- Bluetooth Pairing Console -->
+  <div class="card">
+    <div class="card-header">Bluetooth Pairing</div>
+    <p class="muted" style="font-size:0.85rem; margin:0 0 14px;">
+      Pair a new Xbox Controller to the robot's internal Bluetooth.
+      <br><strong style="color:var(--text)">Note:</strong> Hold the pairing button until the Xbox logo flashes rapidly.
+    </p>
+
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <button id="btn-scan" style="flex:1; border:1px solid var(--accent); color:var(--accent); background:transparent; cursor:pointer;">Start Scan</button>
+      <button onclick="btCmd('scan_off')" style="flex:1; border:1px solid rgba(255,51,102,0.5); color:#ff6688; background:transparent; cursor:pointer;">Stop Scan</button>
+    </div>
+
+    <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <input type="text" id="mac-input" style="flex:1;" placeholder="MAC: XX:XX:XX:XX:XX:XX">
+      <button onclick="pairDevice()" style="border:1px solid rgba(255,179,71,0.5); color:#ffb347; background:transparent; cursor:pointer;">Pair &amp; Connect</button>
+    </div>
+
+    <!-- Raw CLI -->
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <span style="display:flex; align-items:center; padding:0 12px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; color:var(--muted); font-size:0.9rem;">$</span>
+      <input type="text" id="raw-input" style="flex:1; font-family:monospace;" placeholder="Manual bluetoothctl command...">
+      <button onclick="rawCmd()" style="background:transparent; border:1px solid var(--border); cursor:pointer;">Send</button>
+    </div>
+
+    <!-- Console Log -->
+    <div id="bt-console" style="background:rgba(0,0,0,0.4); border:1px solid var(--border); border-radius:10px; height:240px; overflow-y:auto; padding:12px;">
+      <div id="bt-logs" style="font-family:monospace; font-size:0.8rem; color:var(--accent); line-height:1.5;">
+        <em>Awaiting logs...</em>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Console polling loop
+  let pollingLogs = false;
+  let consoleBox = document.getElementById('bt-console');
+  let logContainer = document.getElementById('bt-logs');
+
+  async function pollBluetoothLogs() {
+    if (!pollingLogs) return;
+    try {
+      const res = await fetch('/api/bluetooth/logs');
+      const data = await res.json();
+      if (data.ok && data.logs) {
+        const isScrolledToBottom = consoleBox.scrollHeight - consoleBox.clientHeight <= consoleBox.scrollTop + 10;
+        logContainer.innerHTML = data.logs.join('<br>') + '<br><span style="opacity:0.5">_</span>';
+        if (isScrolledToBottom) consoleBox.scrollTop = consoleBox.scrollHeight;
+
+        const scanBtn = document.getElementById('btn-scan');
+        if (data.is_scanning) {
+          scanBtn.innerHTML = '⏳ Scanning...';
+          scanBtn.disabled = true;
+        } else {
+          scanBtn.innerHTML = 'Start Scan';
+          scanBtn.disabled = false;
+          scanBtn.onclick = () => btCmd('scan_on');
+        }
+      }
+    } catch(e) { console.error(e); }
+    setTimeout(pollBluetoothLogs, 1000);
+  }
+
+  async function btCmd(cmd) {
+    return fetch('/api/bluetooth/cmd', {
+      method: 'POST',
+      body: JSON.stringify({ cmd }),
+      headers: {'Content-Type': 'application/json'}
+    });
+  }
+
+  async function rawCmd() {
+    const inp = document.getElementById('raw-input');
+    if (!inp.value) return;
+    await fetch('/api/bluetooth/cmd', {
+      method: 'POST',
+      body: JSON.stringify({ cmd: 'raw', raw_cmd: inp.value }),
+      headers: {'Content-Type': 'application/json'}
+    });
+    inp.value = '';
+  }
+
+  async function pairDevice() {
+    const mac = document.getElementById('mac-input').value.trim();
+    if (!mac) return alert('Enter a MAC Address first!');
+    await btCmd('scan_off');
+    await fetch('/api/bluetooth/cmd', {
+      method: 'POST',
+      body: JSON.stringify({ cmd: 'pair', mac }),
+      headers: {'Content-Type': 'application/json'}
+    });
+    document.getElementById('mac-input').value = '';
+  }
+
+  async function pollGamepadStatus() {
+    try {
+      const d = await fetch('/api/status').then(r => r.json());
+      const badge = document.getElementById('conn-badge');
+      const txt = document.getElementById('conn-text');
+      const card = document.getElementById('gamepad-status-card');
+      if (d.gamepad_connected) {
+        badge.textContent = 'CONNECTED';
+        badge.style.color = 'var(--accent)';
+        badge.style.borderColor = 'rgba(0,255,204,0.4)';
+        txt.textContent = 'Gamepad is active and drive systems are mapped.';
+        card.style.borderColor = 'rgba(0,255,204,0.2)';
+        card.style.boxShadow = '0 0 20px rgba(0,255,204,0.07)';
+      } else {
+        badge.textContent = 'DISCONNECTED';
+        badge.style.color = 'var(--muted)';
+        badge.style.borderColor = 'rgba(255,255,255,0.12)';
+        txt.textContent = 'Awaiting connection...';
+        card.style.borderColor = 'var(--border)';
+        card.style.boxShadow = 'none';
+      }
+    } catch(e) {}
+    setTimeout(pollGamepadStatus, 2500);
+  }
+
+  async function fetchGamepadServiceStatus() {
+    try {
+        const pwr = await fetch('/api/bluetooth/service_status').then(r => r.json());
+        const sel = document.getElementById('gamepad-enable-select');
+        if (sel) sel.value = pwr.gamepad_enabled ? "true" : "false";
+    } catch(e) {}
+  }
+
+  async function toggleGamepadService() {
+      const sel = document.getElementById('gamepad-enable-select');
+      const enabled = sel.value === "true";
+      await fetch('/api/bluetooth/toggle_service', {
+          method: 'POST',
+          body: JSON.stringify({enabled}),
+          headers: {'Content-Type': 'application/json'}
+      });
+      alert(enabled ? "Gamepad and Bluetooth services enabled. Scanning resumed." : "Gamepad and Bluetooth disabled. Bluetooth radio powered off.");
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    fetchGamepadServiceStatus();
+    pollingLogs = true;
+    pollBluetoothLogs();
+    pollGamepadStatus();
+    document.getElementById('btn-scan').onclick = () => btCmd('scan_on');
+    document.getElementById('raw-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); rawCmd(); }
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,65 @@
+@import url('https://fonts.googleapis.com/css2?family=Jura:wght@400;600;700&display=swap');
+
+:root {
+  --bg: #0a0f18;
+  --panel: rgba(20, 30, 48, 0.7);
+  --panel-2: rgba(30, 42, 60, 0.8);
+  --text: #f0f2f5;
+  --muted: #7a8fa6;
+  --accent: #00ffcc;
+  --accent-dim: rgba(0, 255, 204, 0.15);
+  --danger: #ff3366;
+  --danger-glow: rgba(255, 51, 102, 0.45);
+  --ok: #00ffcc;
+  --warn: #ffb347;
+  --border: rgba(255, 255, 255, 0.07);
+  --glass-blur: blur(10px);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: 'Jura', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding-bottom: 80px;
+  min-height: 100vh;
+}
+
+/* Background texture */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 20%, rgba(0, 255, 204, 0.03) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 80%, rgba(0, 100, 200, 0.04) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+h1, h2, h3, p { margin-top: 0; }
+
+h3 { color: var(--accent); font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 14px; }
+
+button, input, select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 0.95rem;
+  font-family: 'Jura', system-ui, sans-serif;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+button:hover {
+  border-color: rgba(255,255,255,0.15);
+}
+
+input[type='range'] { padding: 0; }
+strong { font-weight: 700; }
+a { color: var(--accent); text-decoration: none; }
+
+.muted { color: var(--muted); font-size: 0.9rem; }

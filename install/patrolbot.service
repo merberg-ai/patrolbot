@@ -1,0 +1,15 @@
+[Unit]
+Description=patrolbot robot control service
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=__PATROLBOT_USER__
+Group=__PATROLBOT_USER__
+WorkingDirectory=__PATROLBOT_HOME__
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__PATROLBOT_HOME__/venv/bin/python __PATROLBOT_HOME__/app.py
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

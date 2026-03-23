@@ -1,0 +1,64 @@
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  position: relative;
+  z-index: 1;
+}
+
+.card-header {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-body { padding: 0; }
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.status-grid > div, .telemetry-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  transition: border-color 0.2s;
+}
+
+.status-grid > div:hover, .telemetry-item:hover {
+  border-color: rgba(0, 255, 204, 0.2);
+}
+
+.status-grid span, .telemetry-item span { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 4px; }
+.status-grid strong, .telemetry-item strong { font-size: 1rem; font-weight: 700; }
+
+.status-pill {
+  background: rgba(0, 255, 204, 0.07);
+  border: 1px solid rgba(0, 255, 204, 0.25);
+  border-radius: 999px;
+  padding: 5px 12px;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 640px) {
+  .status-grid { grid-template-columns: 1fr; }
+}

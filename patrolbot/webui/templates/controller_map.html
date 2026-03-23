@@ -1,0 +1,276 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<!-- Native CSS Listening Modal (overlay) -->
+<div id="listening-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:100; align-items:center; justify-content:center;">
+  <div style="background:rgba(20,30,48,0.97); border:1px solid var(--border); border-radius:16px; padding:32px 28px; max-width:400px; width:90%; text-align:center; backdrop-filter:blur(12px);">
+    <div style="width:48px; height:48px; border:3px solid var(--accent); border-top-color:transparent; border-radius:50%; margin:0 auto 20px; animation:spin 0.8s linear infinite;"></div>
+    <h2 id="listening-action-label" style="font-size:1rem; font-weight:700; color:var(--text); margin:0 0 8px; letter-spacing:0.06em;">Listening for Input...</h2>
+    <p style="color:var(--muted); font-size:0.82rem; margin:0 0 16px;">Move the axis or press the button you want to map.</p>
+    <div style="background:rgba(0,0,0,0.5); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:20px;">
+      <code id="live-input-debug" style="font-size:0.75rem; color:var(--accent); word-break:break-all;">Awaiting initial state...</code>
+    </div>
+    <button onclick="cancelListening()" style="background:transparent; border:1px solid var(--border); color:var(--muted); padding:10px 28px; border-radius:8px; cursor:pointer; font-size:0.85rem;">Cancel</button>
+  </div>
+</div>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<div style="display:flex; flex-direction:column; gap:14px; max-width:700px; margin:0 auto;">
+
+  <div class="card">
+    <div class="card-header">
+      <span>Interactive Controller Mapping</span>
+      <span id="conn-badge" class="status-pill" style="color:var(--muted); border-color:rgba(255,255,255,0.12);">DISCONNECTED</span>
+    </div>
+    <p class="muted" style="margin:0 0 16px; font-size:0.85rem;">
+      Click <strong style="color:var(--text)">Map</strong> next to an action, then press the button or move the joystick you want to assign. The system detects input automatically.
+    </p>
+
+    <div id="mapping-fields" style="display:flex; flex-direction:column; gap:8px;">
+      <!-- Populated by JS -->
+    </div>
+
+    <hr style="border:none; border-top:1px solid var(--border); margin:16px 0;">
+    <div style="display:flex; justify-content:space-between; gap:10px;">
+      <a href="/controller" style="padding:11px 20px; border:1px solid var(--border); border-radius:10px; color:var(--muted); font-size:0.82rem; font-weight:700; letter-spacing:0.06em;">← Back</a>
+      <button onclick="resetToDefaults()" style="padding:11px 20px; border:1px solid rgba(255,51,102,0.5); border-radius:10px; color:#ff6688; background:transparent; font-size:0.82rem; font-weight:700; letter-spacing:0.06em; cursor:pointer;">Reset to Defaults</button>
+      <button onclick="saveMapping()" style="flex:1; max-width:200px; border:1px solid var(--accent); background:var(--accent-dim); color:var(--accent); font-weight:700; letter-spacing:0.06em; cursor:pointer; border-radius:10px;">Save Mapping</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const mappingConfig = [
+    { id: 'throttle_fwd', label: 'Drive Forward', type: 'axis', group: 'Drive' },
+    { id: 'throttle_rev', label: 'Drive Reverse (Brake)', type: 'axis', group: 'Drive' },
+    { id: 'steering', label: 'Steering Left/Right', type: 'axis', group: 'Drive' },
+    { id: 'steering_center', label: 'Center Steering', type: 'button', group: 'Drive' },
+
+    { id: 'pan', label: 'Camera Pan (Axis)', type: 'axis', group: 'Camera' },
+    { id: 'tilt', label: 'Camera Tilt (Axis)', type: 'axis', group: 'Camera' },
+    { id: 'pan_left', label: 'Pan Left', type: 'button', group: 'Camera' },
+    { id: 'pan_right', label: 'Pan Right', type: 'button', group: 'Camera' },
+    { id: 'tilt_up', label: 'Tilt Up', type: 'button', group: 'Camera' },
+    { id: 'tilt_down', label: 'Tilt Down', type: 'button', group: 'Camera' },
+    { id: 'camera_home', label: 'Center Camera', type: 'button', group: 'Camera' },
+
+    { id: 'lights_toggle', label: 'Toggle Headlights', type: 'button', group: 'Lights' },
+    { id: 'tracking_toggle', label: 'Toggle Object Tracking', type: 'button', group: 'Tracking' },
+    { id: 'estop_toggle', label: 'Toggle E-Stop', type: 'button', group: 'Safety' }
+  ];
+
+  const knownAxes = ['ABS_X', 'ABS_Y', 'ABS_Z', 'ABS_RX', 'ABS_RY', 'ABS_RZ', 'ABS_GAS', 'ABS_BRAKE', 'ABS_HAT0X', 'ABS_HAT0Y'];
+  const knownBtns = ['BTN_A', 'BTN_B', 'BTN_X', 'BTN_Y', 'BTN_TR', 'BTN_TL', 'BTN_THUMBR', 'BTN_THUMBL', 'BTN_SOUTH', 'BTN_EAST', 'BTN_NORTH', 'BTN_WEST', 'BTN_TR2', 'BTN_TL2', 'BTN_START', 'BTN_SELECT', 'BTN_MODE', 'BTN_BACK'];
+
+  let currentMapping = {};
+  let isConnected = false;
+  let activeListenId = null;
+  let listenStartTime = 0;
+  let baselineState = null;
+  let listenPollInterval = null;
+  let activeAxisInfo = {};
+
+  function showListeningModal() {
+    const el = document.getElementById('listening-overlay');
+    el.style.display = 'flex';
+  }
+
+  function hideListeningModal() {
+    document.getElementById('listening-overlay').style.display = 'none';
+  }
+
+  async function fetchStatus() {
+    try {
+      const d = await fetch('/api/bluetooth/debug').then(r => r.json());
+      const badge = document.getElementById('conn-badge');
+      isConnected = d.ok && d.connected;
+      if (isConnected) {
+        badge.textContent = `CONNECTED: ${d.device_name}`;
+        badge.style.color = 'var(--accent)';
+        badge.style.borderColor = 'rgba(0,255,204,0.4)';
+      } else {
+        badge.textContent = 'DISCONNECTED';
+        badge.style.color = 'var(--muted)';
+        badge.style.borderColor = 'rgba(255,255,255,0.12)';
+      }
+      activeAxisInfo = d.axis_info || {};
+      return d;
+    } catch(e) {
+      isConnected = false;
+      return { ok: false, connected: false };
+    }
+  }
+
+  async function loadMapping() {
+    try {
+      const d = await fetch('/api/bluetooth/mapping').then(r => r.json());
+      if (d.ok && d.mapping) {
+        currentMapping = d.mapping;
+        renderMappingUI();
+      }
+    } catch(e) {}
+  }
+
+  function renderMappingUI() {
+    const container = document.getElementById('mapping-fields');
+    if (!container) return;
+    let html = '';
+    let currentGroup = '';
+    mappingConfig.forEach(item => {
+      if (item.group && item.group !== currentGroup) {
+        currentGroup = item.group;
+        html += `<div style="font-weight:700; color:var(--text); margin-top:16px; margin-bottom:4px; font-size:0.95rem; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:4px; letter-spacing:0.04em;">${currentGroup}</div>`;
+      }
+      const val = currentMapping[item.id] || 'Unassigned';
+      const isAxis = item.type === 'axis';
+      const isAssigned = val !== 'Unassigned';
+      html += `
+        <div id="row_${item.id}" style="display:flex; align-items:center; gap:12px; padding:10px 14px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:10px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700; font-size:0.9rem;">${item.label}</div>
+            <div style="font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em;">${isAxis ? '🕹 Axis/Trigger' : '🔘 Button'}</div>
+          </div>
+          <div>
+            <span id="val_${item.id}" style="font-family:monospace; font-size:0.8rem; padding:4px 10px; border-radius:6px; background:${isAssigned ? 'rgba(0,255,204,0.1)' : 'rgba(255,255,255,0.05)'}; border:1px solid ${isAssigned ? 'rgba(0,255,204,0.3)' : 'var(--border)'}; color:${isAssigned ? 'var(--accent)' : 'var(--muted)'};">${val}</span>
+          </div>
+          <button onclick="startListening('${item.id}', '${item.label}', '${item.type}')" style="background:transparent; border:1px solid var(--border); color:var(--muted); padding:6px 14px; border-radius:8px; cursor:pointer; font-size:0.8rem; flex-shrink:0; transition:color 0.15s, border-color 0.15s;"
+            onmouseover="this.style.color='var(--text)'; this.style.borderColor='rgba(255,255,255,0.25)'"
+            onmouseout="this.style.color='var(--muted)'; this.style.borderColor='var(--border)'">Map</button>
+          <button onclick="clearMapping('${item.id}')" style="background:transparent; border:1px solid rgba(255,51,102,0.3); color:#ff6688; padding:6px 10px; border-radius:8px; cursor:pointer; font-size:0.8rem; flex-shrink:0;">Clear</button>
+        </div>`;
+    });
+    container.innerHTML = html;
+  }
+
+  async function startListening(actionId, label, expectedType) {
+    if (!isConnected) { alert('No gamepad connected! Pair one on the Controller page first.'); return; }
+    const status = await fetchStatus();
+    if (!status.connected) return;
+    baselineState = status.axis_state || {};
+    activeListenId = actionId;
+    listenStartTime = Date.now() / 1000;
+    document.getElementById('listening-action-label').textContent = `Mapping: ${label}`;
+    document.getElementById('live-input-debug').textContent = `Baseline captured. Move ${expectedType}...`;
+    showListeningModal();
+    listenPollInterval = setInterval(() => checkInputDelta(expectedType), 100);
+  }
+
+  function cancelListening() {
+    if (listenPollInterval) clearInterval(listenPollInterval);
+    listenPollInterval = null;
+    activeListenId = null;
+    listenStartTime = 0;
+    baselineState = null;
+    hideListeningModal();
+  }
+
+  async function checkInputDelta(expectedType) {
+    if (!activeListenId) return;
+    const status = await fetchStatus();
+    if (!status.connected || !status.axis_state) return;
+    const currentState = status.axis_state;
+    const dbgStr = Object.entries(currentState).filter(([k,v]) => {
+      const base = baselineState[k] || 0;
+      const d = Math.abs(v - base);
+      return (k.includes('ABS') && d > 2000) || (!k.includes('ABS') && d > 0);
+    }).map(([k,v]) => `${k}:${v}`).join(' | ');
+    document.getElementById('live-input-debug').textContent = dbgStr || 'No active inputs...';
+
+    let detected = null;
+
+    // Check explicitly captured last event to not miss quick clicks
+    if (status.last_input_event && status.last_input_event.ts > listenStartTime) {
+      const evt = status.last_input_event;
+      if (typeof evt.code === 'string') {
+        const isBtnEvt = evt.type === 'button' || knownBtns.includes(evt.code) || evt.code.startsWith('BTN_') || evt.code.startsWith('KEY_');
+        const isAxisEvt = evt.type === 'axis' || knownAxes.includes(evt.code) || evt.code.startsWith('ABS_');
+        if (expectedType === 'button' && (isBtnEvt || (isAxisEvt && evt.code.includes('HAT')))) {
+          if (Math.abs(evt.value - (baselineState[evt.code] || 0)) >= 1) {
+            detected = evt.code;
+          }
+        }
+      }
+    }
+
+    if (!detected) {
+      for (const [key, val] of Object.entries(currentState)) {
+        const base = baselineState[key] || 0;
+        const diff = Math.abs(val - base);
+        const isBtn = knownBtns.includes(key) || key.startsWith('BTN_') || key.startsWith('KEY_');
+        const isAxis = knownAxes.includes(key) || key.startsWith('ABS_');
+        const info = activeAxisInfo[key] || [0, 0, 0];
+        const flat = Array.isArray(info) ? (info[2] || 0) : 0;
+        let ok = false;
+        
+        if (isBtn && diff >= 1 && val === 1) ok = true;
+        else if (isAxis && key.includes('HAT') && diff >= 1) ok = true;
+        else if (isAxis && (key === 'ABS_Z' || key === 'ABS_RZ' || key === 'ABS_GAS' || key === 'ABS_BRAKE') && diff >= Math.max(64, flat + 16)) ok = true;
+        else if (isAxis && diff >= Math.max(8000, flat * 2, 2048)) ok = true;
+        
+        if (!ok) continue;
+        if (expectedType === 'button' && isAxis && !key.includes('HAT')) continue;
+        if (expectedType === 'axis' && isBtn) continue;
+        
+        detected = key;
+        break;
+      }
+    }
+
+    if (detected) {
+      clearInterval(listenPollInterval);
+      listenPollInterval = null;
+      currentMapping[activeListenId] = detected;
+      const badge = document.getElementById(`val_${activeListenId}`);
+      if (badge) {
+        badge.textContent = detected;
+        badge.style.color = 'var(--accent)';
+        badge.style.background = 'rgba(0,255,204,0.1)';
+        badge.style.borderColor = 'rgba(0,255,204,0.35)';
+      }
+      setTimeout(() => { hideListeningModal(); activeListenId = null; }, 400);
+    }
+  }
+
+  async function saveMapping() {
+    try {
+      const d = await fetch('/api/bluetooth/mapping', {
+        method: 'POST',
+        body: JSON.stringify({ mapping: currentMapping }),
+        headers: {'Content-Type': 'application/json'}
+      }).then(r => r.json());
+      if (d.ok) alert('Mapping saved and applied immediately!');
+      else alert('Error: ' + d.error);
+    } catch(e) { alert('Network error saving mapping.'); }
+  }
+
+  function clearMapping(actionId) {
+    currentMapping[actionId] = 'Unassigned';
+    renderMappingUI();
+  }
+
+  async function resetToDefaults() {
+    if (!confirm('Are you sure you want to reset all game controller bindings to their factory defaults?')) return;
+    try {
+      const d = await fetch('/api/bluetooth/mapping/reset', { method: 'POST' }).then(r => r.json());
+      if (d.ok) {
+        currentMapping = d.mapping;
+        renderMappingUI();
+        alert('Mapping reset to defaults.');
+      } else {
+        alert('Error: ' + d.error);
+      }
+    } catch(e) { alert('Network error resetting mapping.'); }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadMapping();
+    setInterval(fetchStatus, 3000);
+    fetchStatus();
+  });
+</script>
+{% endblock %}

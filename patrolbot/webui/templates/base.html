@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang='en'>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>
+  <title>patrolbot{% if page %} · {{ page }}{% endif %}</title>
+  <link rel='preconnect' href='https://fonts.googleapis.com'>
+  <link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>
+  <link rel='stylesheet' href='{{ url_for("static", filename="css/base.css") }}'>
+  <link rel='stylesheet' href='{{ url_for("static", filename="css/layout.css") }}'>
+  <link rel='stylesheet' href='{{ url_for("static", filename="css/cards.css") }}'>
+  <link rel='stylesheet' href='{{ url_for("static", filename="css/controls.css") }}'>
+  <link rel='stylesheet' href='{{ url_for("static", filename="css/theme.css") }}'>
+</head>
+<body data-page='{{ page }}'>
+  <header class='app-header'>
+    <div style='display:flex; align-items:baseline; gap:8px;'>
+      <span class='header-title'>{{ page | upper if page else 'patrolbot' }}</span>
+      <span id='app-version-tag' style='font-size:0.65rem; opacity:0.45; font-family:monospace; letter-spacing:0.02em; display:none;'></span>
+    </div>
+    <div class='header-actions'>
+      <div class='header-batt-mini'>
+        <div class='batt-bar-mini'><div id='batt-mini-fill' class='batt-bar-mini-fill'></div></div>
+        <span id='batt-mini-label'>--%</span>
+      </div>
+      <button data-action='global-estop' class='danger estop-button'>E-STOP</button>
+      <div id='status-pill' class='status-pill status-ready'>connecting</div>
+    </div>
+  </header>
+
+  <section id='telemetry-banner' class='telemetry-banner card telemetry-banner-ready'>
+    <div class='telemetry-banner-top'>
+      <div>
+        <div class='telemetry-banner-title'>Patrolbot Status</div>
+        <div id='banner-status-text' class='telemetry-banner-status'>Connecting…</div>
+      </div>
+      <div class='telemetry-banner-battery'>
+        <div class='telemetry-banner-battery-head'>
+          <span>Battery</span>
+          <strong id='banner-battery-label'>--</strong>
+        </div>
+        <div class='battery-progress'>
+          <div id='battery-progress-fill' class='battery-progress-fill'></div>
+        </div>
+      </div>
+    </div>
+
+    <div class='telemetry-banner-grid'>
+      <div class='telemetry-item'><span>Voltage</span><strong id='battery-voltage'>--</strong></div>
+      <div class='telemetry-item'><span>Distance</span><strong id='distance-cm'>--</strong></div>
+      <div class='telemetry-item'><span>Motors</span><strong id='banner-motor-state'>--</strong></div>
+      <div class='telemetry-item'><span>Speed</span><strong id='banner-motor-speed'>--</strong></div>
+      <div class='telemetry-item'><span>E-STOP</span><strong id='banner-estop'>--</strong></div>
+      <div class='telemetry-item'><span>Motion Lock</span><strong id='banner-motion-lock'>--</strong></div>
+    </div>
+    <p id='global-action-message' class='muted global-action-message' aria-live='polite'></p>
+  </section>
+
+  <main class='page-content'>{% block content %}{% endblock %}</main>
+
+  <nav class='bottom-nav'>
+    <a href='/patrol' class='nav-item {% if page=="patrol" %}active{% endif %}'><span class='nav-icon'>🤖</span>Patrol</a>
+    <a href='/settings' class='nav-item {% if page=="settings" %}active{% endif %}'><span class='nav-icon'>⚙️</span>Settings</a>
+    <a href='/system' class='nav-item {% if page=="system" %}active{% endif %}'><span class='nav-icon'>🖥</span>System</a>
+  </nav>
+
+  <script src='{{ url_for("static", filename="js/api.js") }}'></script>
+  <script src='{{ url_for("static", filename="js/core.js") }}'></script>
+  <script src='{{ url_for("static", filename="js/settings.js") }}'></script>
+  <script src='{{ url_for("static", filename="js/patrol.js") }}'></script>
+  <script src='{{ url_for("static", filename="js/system.js") }}'></script>
+
+  <script>
+    (function() {
+      const fill = document.getElementById('batt-mini-fill');
+      const label = document.getElementById('batt-mini-label');
+      let versionLoaded = false;
+      async function syncBatt() {
+        try {
+          const d = await fetch('/api/status').then(r => r.json());
+          const pct = d.battery_percent ?? 0;
+          if (fill) {
+            fill.style.width = pct + '%';
+            fill.className = 'batt-bar-mini-fill' + (pct <= 15 ? ' is-critical' : pct <= 30 ? ' is-low' : '');
+          }
+          if (label) label.textContent = pct + '%';
+        } catch(e) {}
+        setTimeout(syncBatt, 2000);
+      }
+      async function loadVersion() {
+        if (versionLoaded) return;
+        try {
+          const d = await fetch('/api/system').then(r => r.json());
+          const vtag = document.getElementById('app-version-tag');
+          if (vtag && d.version && d.version.version_string) {
+            vtag.textContent = d.version.version_string;
+            vtag.style.display = '';
+            versionLoaded = true;
+          }
+        } catch(e) {}
+      }
+      syncBatt();
+      loadVersion();
+    })();
+  </script>
+</body>
+</html>
