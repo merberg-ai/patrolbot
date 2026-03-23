@@ -130,9 +130,13 @@ class PatrolService:
         if not sensor:
             return None
         try:
-            distance = sensor.measure_distance_cm()
+            if hasattr(sensor, 'read_cm'):
+                distance = sensor.read_cm()
+            else:
+                distance = sensor.measure_distance_cm()
             if distance is None:
                 return None
+            self.runtime.state.patrol_last_error = None
             return round(float(distance), 1)
         except Exception as exc:
             self.runtime.state.patrol_last_error = f'ultrasonic read failed: {exc}'
