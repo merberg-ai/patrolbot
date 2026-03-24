@@ -61,6 +61,8 @@ class CameraServoController:
     def set_pan(self, angle: int):
         logical_angle = self._clamp_pan(angle)
         physical_angle = self._physical_pan(logical_angle)
+        if logical_angle == self.pan_angle:
+            return
         self.driver.set_servo_angle(self.pan_channel, physical_angle)
         self.pan_angle = logical_angle
         if self.logger:
@@ -69,6 +71,8 @@ class CameraServoController:
     def set_tilt(self, angle: int):
         logical_angle = self._clamp_tilt(angle)
         physical_angle = self._physical_tilt(logical_angle)
+        if logical_angle == self.tilt_angle:
+            return
         self.driver.set_servo_angle(self.tilt_channel, physical_angle)
         self.tilt_angle = logical_angle
         if self.logger:

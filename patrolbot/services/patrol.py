@@ -217,9 +217,9 @@ class PatrolService:
             motors = self.runtime.registry.motors
             steering = self.runtime.registry.steering
             if not state.patrol_enabled:
-                if state.patrol_drive_state != 'stopped':
+                if state.patrol_drive_state != 'stopped' or motors is not None and motors.state != 'stopped':
                     state.patrol_drive_state = 'stopped'
-                self._stop_motion()
+                    self._stop_motion()
                 self._update_scan()
                 time.sleep(0.1)
                 continue

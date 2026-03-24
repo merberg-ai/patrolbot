@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Servo Trim</h2></div>
+  <p class='muted'>Fine-tune steering and camera alignment without touching code.</p>
+  <div class='status-grid'>
+    <div>
+      <span>Steering Trim</span>
+      <div class='button-grid'>
+        <button data-trim-target='trim-steering' data-delta='-1'>-</button>
+        <input id='trim-steering' type='number' min='-20' max='20' step='1' value='0'>
+        <button data-trim-target='trim-steering' data-delta='1'>+</button>
+      </div>
+    </div>
+    <div>
+      <span>Camera Pan Trim</span>
+      <div class='button-grid'>
+        <button data-trim-target='trim-pan' data-delta='-1'>-</button>
+        <input id='trim-pan' type='number' min='-20' max='20' step='1' value='0'>
+        <button data-trim-target='trim-pan' data-delta='1'>+</button>
+      </div>
+    </div>
+    <div>
+      <span>Camera Tilt Trim</span>
+      <div class='button-grid'>
+        <button data-trim-target='trim-tilt' data-delta='-1'>-</button>
+        <input id='trim-tilt' type='number' min='-20' max='20' step='1' value='0'>
+        <button data-trim-target='trim-tilt' data-delta='1'>+</button>
+      </div>
+    </div>
+  </div>
+  <div class='button-grid'>
+    <button id='save-servo-trims' class='primary'>Save Servo Trim</button>
+    <button id='test-steering-center'>Center Steering</button>
+    <button id='test-camera-home'>Home Camera</button>
+  </div>
+  <p id='settings-message' class='muted'>Loading servo trim…</p>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Camera Settings</h2></div>
+  <p class='muted'>These settings restart the camera when saved. Small moves first — camera tuning can get weird fast.</p>
+  <div class='status-grid'>
+    <div><span>AWB Mode</span><select id='camera-awb-mode'><option value='auto'>Auto</option><option value='incandescent'>Incandescent</option><option value='tungsten'>Tungsten</option><option value='fluorescent'>Fluorescent</option><option value='indoor'>Indoor</option><option value='daylight'>Daylight</option><option value='cloudy'>Cloudy</option><option value='custom'>Custom</option></select></div>
+    <div><span>FPS <strong id='camera-fps-label'></strong></span><input id='camera-fps' type='range' min='5' max='60' step='1' value='20'></div>
+    <div><span>Brightness <strong id='camera-brightness-label'></strong></span><input id='camera-brightness' type='range' min='-1' max='1' step='0.01' value='0'></div>
+    <div><span>Contrast <strong id='camera-contrast-label'></strong></span><input id='camera-contrast' type='range' min='0' max='3' step='0.01' value='1'></div>
+    <div><span>Saturation <strong id='camera-saturation-label'></strong></span><input id='camera-saturation' type='range' min='0' max='3' step='0.01' value='1'></div>
+    <div><span>Sharpness <strong id='camera-sharpness-label'></strong></span><input id='camera-sharpness' type='range' min='0' max='3' step='0.01' value='1'></div>
+    <div><span>Exposure Compensation <strong id='camera-exposure-compensation-label'></strong></span><input id='camera-exposure-compensation' type='range' min='-8' max='8' step='0.1' value='0'></div>
+    <div><span>Manual Red Gain</span><input id='camera-manual-red-gain' type='number' min='0' max='32' step='0.1'></div>
+    <div><span>Manual Blue Gain</span><input id='camera-manual-blue-gain' type='number' min='0' max='32' step='0.1'></div>
+  </div>
+  <div class='button-grid'>
+    <button id='save-camera-settings' class='primary'>Save Camera Settings</button>
+    <button id='reset-camera-settings'>Reset Camera Defaults</button>
+  </div>
+  <p id='camera-settings-message' class='muted'>Loading camera settings…</p>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Settings Preview</h2></div>
+  <img id='settings-camera-preview' class='camera-stream' src='/video_feed?view=settings' alt='Settings camera preview'>
+</section>
+{% endblock %}

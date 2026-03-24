@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>System Status</h2></div>
+  <div class='status-grid'>
+    <div><span>IP Address</span><strong id='system-ip'>--</strong></div>
+    <div><span>Mode</span><strong id='system-mode'>--</strong></div>
+    <div><span>LED State</span><strong id='system-led'>--</strong></div>
+  </div>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Version</h2></div>
+  <div class='status-grid'>
+    <div><span>Version String</span><strong id='ver-string'>--</strong></div>
+    <div><span>App Version</span><strong id='ver-app'>--</strong></div>
+    <div><span>Git Branch</span><strong id='ver-branch'>--</strong></div>
+    <div><span>Git Commit</span><strong id='ver-commit'>--</strong></div>
+    <div><span>Git Tag</span><strong id='ver-tag'>--</strong></div>
+    <div><span>Commit Date</span><strong id='ver-date'>--</strong></div>
+    <div><span>Working Tree</span><strong id='ver-dirty'>--</strong></div>
+  </div>
+  <p id='ver-message' class='muted' style='display:none;'></p>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Power Actions</h2></div>
+  <p class='muted'>These buttons hit real system commands. No take-backs, no drama, just Linux doing Linux things.</p>
+  <div class='button-grid'>
+    <button id='reboot-btn'>Reboot</button>
+    <button id='shutdown-btn' class='danger'>Shutdown</button>
+  </div>
+  <p id='system-action-message' class='muted'></p>
+</section>
+{% endblock %}

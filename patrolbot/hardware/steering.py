@@ -43,6 +43,8 @@ class SteeringController:
     def set_angle(self, angle: int) -> None:
         logical_angle = self._clamp(angle)
         physical_angle = self._physical_angle(logical_angle)
+        if logical_angle == self.angle:
+            return
         self.driver.set_servo_angle(self.channel, physical_angle)
         self.angle = logical_angle
 

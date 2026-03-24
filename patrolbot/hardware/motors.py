@@ -150,11 +150,14 @@ class MotorController:
             actual = -throttle if ch in self.invert_channels else throttle
             self.motors[ch].throttle = actual
             applied[ch] = round(actual, 3)
-        self.logger.info("Applied motor throttle=%s to channels=%s", round(throttle, 3), applied)
 
     def forward(self, speed: int | None = None) -> None:
         self._check_motion_allowed()
         speed = self.default_speed if speed is None else self._clamp_speed(speed)
+
+        if self.state == "forward" and self.speed == speed:
+            self._touch()
+            return
 
         throttle = self._directional_throttle(speed, forward=True)
 
@@ -169,6 +172,10 @@ class MotorController:
         self._check_motion_allowed()
         speed = self.default_speed if speed is None else self._clamp_speed(speed)
 
+        if self.state == "backward" and self.speed == speed:
+            self._touch()
+            return
+
         throttle = self._directional_throttle(speed, forward=False)
 
         self._apply_all(throttle)
@@ -179,6 +186,8 @@ class MotorController:
         self.logger.info("Motors backward at %s%%", self.speed)
 
     def stop(self) -> None:
+        if self.state == "stopped" and self.speed == 0:
+            return
         for dc in self.motors.values():
             dc.throttle = 0.0
         self.speed = 0
