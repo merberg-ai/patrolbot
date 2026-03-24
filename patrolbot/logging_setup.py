@@ -14,5 +14,4 @@ def setup_logging(config: dict) -> logging.Logger:
         log_path = Path(__file__).resolve().parent.parent / log_path
     log_path.parent.mkdir(parents=True, exist_ok=True)
     fh = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3); fh.setFormatter(fmt); logger.addHandler(fh)
-    logging.getLogger('werkzeug').setLevel(logging.WARNING)
     return logger
