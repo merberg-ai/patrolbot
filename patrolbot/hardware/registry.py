@@ -10,6 +10,7 @@ class HardwareRegistry:
     steering: object | None = None
     camera_servo: object | None = None
     ultrasonic: object | None = None
+    ultrasonic_rear: object | None = None
     battery: object | None = None
     switches: object | None = None
     camera: object | None = None

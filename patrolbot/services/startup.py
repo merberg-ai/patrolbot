@@ -61,6 +61,11 @@ class StartupManager:
             registry.switches.all_off()
 
             registry.ultrasonic = UltrasonicSensor(self.config, self.logger)
+            if self.config.get('ultrasonic_rear', {}).get('enabled', False):
+                try:
+                    registry.ultrasonic_rear = UltrasonicSensor(self.config, self.logger, config_key='ultrasonic_rear')
+                except Exception as exc:
+                    self.logger.warning('Failed to initialize rear ultrasonic: %s', exc)
             registry.battery = BatteryMonitor(self.config, self.logger)
 
             registry.camera = CameraWrapper(self.config, self.logger)

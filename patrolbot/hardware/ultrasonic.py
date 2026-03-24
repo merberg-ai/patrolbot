@@ -7,10 +7,11 @@ from gpiozero import DistanceSensor
 
 
 class UltrasonicSensor:
-    def __init__(self, config: dict, logger):
+    def __init__(self, config: dict, logger, config_key: str = 'ultrasonic'):
         self.config = config or {}
         self.logger = logger
-        ultra_cfg = self.config.get('ultrasonic', {})
+        self.config_key = config_key
+        ultra_cfg = self.config.get(self.config_key, {})
 
         self.trigger_pin = int(ultra_cfg.get('trigger_pin', 23))
         self.echo_pin = int(ultra_cfg.get('echo_pin', 24))
@@ -25,7 +26,8 @@ class UltrasonicSensor:
             max_distance=self.max_distance_m,
         )
         self.logger.info(
-            'Ultrasonic sensor initialized: trigger=%s echo=%s max_distance=%.2fm samples=%s',
+            '%s sensor initialized: trigger=%s echo=%s max_distance=%.2fm samples=%s',
+            self.config_key.capitalize(),
             self.trigger_pin,
             self.echo_pin,
             self.max_distance_m,

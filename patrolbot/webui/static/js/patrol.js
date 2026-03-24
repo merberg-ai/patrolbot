@@ -65,6 +65,7 @@ function renderPatrolState(state){
   updatePatrolToggleButton(!!state.enabled);
   setText('patrol-drive-state', state.drive_state || '--');
   setText('patrol-distance', state.metrics && state.metrics.last_distance_cm != null ? `${state.metrics.last_distance_cm} cm` : '--');
+  setText('patrol-rear-distance', state.metrics && state.metrics.last_rear_distance_cm != null ? `${state.metrics.last_rear_distance_cm} cm` : '--');
   setText('patrol-obstacles', state.metrics && state.metrics.obstacle_count != null ? String(state.metrics.obstacle_count) : '0');
   setText('patrol-last-turn', state.metrics && state.metrics.last_turn ? state.metrics.last_turn : '--');
   setText('patrol-loop-hz', state.metrics && state.metrics.loop_hz != null ? `${state.metrics.loop_hz} Hz` : '--');

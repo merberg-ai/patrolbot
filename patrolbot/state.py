@@ -18,7 +18,7 @@ class RuntimeState:
 
     patrol_enabled: bool = False
     patrol_mode: str = 'patrol'
-    patrol_drive_state: str = 'stopped'
+    patrol_drive_state: str = 'idle'
     patrol_speed: int = 0
     patrol_targets: list[str] = field(default_factory=list)
     patrol_detect_count: int = 0

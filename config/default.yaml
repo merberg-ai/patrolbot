@@ -60,6 +60,14 @@ ultrasonic:
   samples: 3
   sample_delay_s: 0.02
   offset_cm: 0.0
+ultrasonic_rear:
+  enabled: false
+  trigger_pin: 17
+  echo_pin: 27
+  max_distance_m: 2.0
+  samples: 3
+  sample_delay_s: 0.02
+  offset_cm: 0.0
 battery:
   low_voltage: 6.8
   critical_voltage: 6.4
@@ -116,3 +124,5 @@ patrol:
   scan_pan_max: 135
   scan_step: 2
   scan_tilt_angle: 90
+  memory_max_repeats: 3
+  trapped_timeout_s: 10.0

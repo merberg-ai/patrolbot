@@ -21,6 +21,8 @@ class PatrolService:
         'scan_pan_max': 135,
         'scan_step': 2,
         'scan_tilt_angle': 90,
+        'memory_max_repeats': 3,
+        'trapped_timeout_s': 10.0,
     }
 
     def __init__(self, runtime, logger):
@@ -34,6 +36,8 @@ class PatrolService:
         self._scan_interval_idle = 0.6
         self._scan_interval_active = 0.25
         self._last_scan_ts = 0.0
+        self._consecutive_blocks = 0
+        self._last_escape_ts = time.monotonic()
         self._sync_state_basics()
 
     def _normalize(self, source: dict) -> dict:
@@ -53,6 +57,8 @@ class PatrolService:
             cfg['scan_pan_min'], cfg['scan_pan_max'] = cfg['scan_pan_max'], cfg['scan_pan_min']
         cfg['scan_step'] = max(1, int(cfg.get('scan_step', 2)))
         cfg['scan_tilt_angle'] = int(cfg.get('scan_tilt_angle', 90))
+        cfg['memory_max_repeats'] = max(1, int(cfg.get('memory_max_repeats', 3)))
+        cfg['trapped_timeout_s'] = max(1.0, float(cfg.get('trapped_timeout_s', 10.0)))
         return cfg
 
     def _sync_state_basics(self):
@@ -96,7 +102,7 @@ class PatrolService:
         self.update_config({'enabled': False}, persist=True)
         self._stop_motion()
         self.runtime.state.mode = 'idle'
-        self.runtime.state.patrol_drive_state = 'stopped'
+        self.runtime.state.patrol_drive_state = 'idle'
         self.runtime.state.patrol_disable_reason = reason
         self.logger.info('Patrol disabled: %s', reason)
 
@@ -184,15 +190,42 @@ class PatrolService:
             self.runtime.state.motor_state = motors.state
             self.runtime.state.speed = motors.speed
 
+    def _measure_rear_distance(self):
+        sensor = self.runtime.registry.ultrasonic_rear
+        if not sensor:
+            return None
+        try:
+            val = sensor.read_cm()
+            return val
+        except Exception:
+            return None
+
     def _reverse_once(self):
         motors = self.runtime.registry.motors
         if not motors:
             return
         self.runtime.state.patrol_drive_state = 'reversing'
+        
+        rear_dist = self._measure_rear_distance()
+        self.runtime.state.patrol_metrics['last_rear_distance_cm'] = rear_dist
+        if rear_dist is not None and rear_dist < 15.0:
+            self.logger.info('Rear blocked (%.1fcm), skipping reverse', rear_dist)
+            return
+
         motors.backward(self._config.get('reverse_speed', 28))
         self.runtime.state.motor_state = motors.state
         self.runtime.state.speed = motors.speed
-        time.sleep(self._config.get('reverse_time_sec', 0.8))
+        
+        # Simple step-wise reverse to check sensor (naive non-blocking approach)
+        total_time = self._config.get('reverse_time_sec', 0.8)
+        steps = int(total_time / 0.1) + 1
+        for _ in range(steps):
+            time.sleep(0.1)
+            d = self._measure_rear_distance()
+            if d is not None and d < 10.0:
+                 self.logger.info('Rear blocked dynamically, stopping reverse')
+                 break
+
         motors.stop()
         self.runtime.state.motor_state = motors.state
         self.runtime.state.speed = motors.speed
@@ -236,8 +269,8 @@ class PatrolService:
             motors = self.runtime.registry.motors
             steering = self.runtime.registry.steering
             if not state.patrol_enabled:
-                if state.patrol_drive_state != 'stopped' or motors is not None and motors.state != 'stopped':
-                    state.patrol_drive_state = 'stopped'
+                if state.patrol_drive_state != 'idle' or (motors is not None and motors.state != 'stopped'):
+                    state.patrol_drive_state = 'idle'
                     self._stop_motion()
                 if self._config.get('scan_on_boot', True):
                     self._update_scan()
@@ -253,6 +286,16 @@ class PatrolService:
             distance = self._measure_distance()
             state.patrol_metrics['last_distance_cm'] = distance
 
+            if state.patrol_drive_state == 'trapped':
+                if time.monotonic() - self._last_escape_ts > self._config.get('trapped_timeout_s', 10.0):
+                    self.logger.info('Trapped timeout expired, attempting recovery')
+                    self._consecutive_blocks = 0
+                    state.patrol_drive_state = 'idle'
+                else:
+                    self._stop_motion()
+                    time.sleep(1.0)
+                    continue
+
             try:
                 if distance is not None and 0 < distance < self._config.get('avoidance_distance_cm', 30):
                     state.patrol_metrics['obstacle_count'] = int(state.patrol_metrics.get('obstacle_count', 0)) + 1
@@ -261,18 +304,34 @@ class PatrolService:
                     state.motor_state = motors.state
                     state.speed = motors.speed
                     time.sleep(0.1)
+                    
+                    now = time.monotonic()
+                    if now - self._last_escape_ts < 3.0:
+                        self._consecutive_blocks += 1
+                    else:
+                        self._consecutive_blocks = 1
+                    self._last_escape_ts = now
+                    
+                    if self._consecutive_blocks > self._config.get('memory_max_repeats', 3):
+                        self.logger.warning('Consecutive blocks max reached (%d), entered trapped state', self._consecutive_blocks)
+                        state.patrol_drive_state = 'trapped'
+                        self._stop_motion()
+                        continue
+                        
                     self._reverse_once()
                     direction = self._choose_turn_direction()
                     self._turn_once(direction)
                     state.patrol_drive_state = 'recovering'
                     time.sleep(0.15)
                 else:
-                    steering.center()
-                    state.steering_angle = steering.angle
-                    state.patrol_drive_state = 'forward'
-                    motors.forward(self._config.get('speed', 35))
-                    state.motor_state = motors.state
-                    state.speed = motors.speed
+                    if state.patrol_drive_state != 'forward':
+                        self._consecutive_blocks = 0
+                        steering.center()
+                        state.steering_angle = steering.angle
+                        state.patrol_drive_state = 'forward'
+                        motors.forward(self._config.get('speed', 35))
+                        state.motor_state = motors.state
+                        state.speed = motors.speed
                     time.sleep(0.05)
             except RuntimeError as exc:
                 state.patrol_last_error = str(exc)

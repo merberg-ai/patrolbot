@@ -104,6 +104,7 @@ function renderGlobalStatus(rawData){
   const batteryPercentText = data.battery_percent == null ? '--' : `${data.battery_percent}%`;
   setText('battery-voltage', data.battery_voltage == null ? '--' : `${data.battery_voltage} V`);
   setText('distance-cm', data.distance_cm == null ? '--' : `${data.distance_cm} cm`);
+  setText('distance-rear-cm', data.distance_rear_cm == null ? '--' : `${data.distance_rear_cm} cm`);
   setText('banner-battery-label', data.battery_voltage == null ? batteryPercentText : `${batteryPercentText} · ${data.battery_voltage} V`);
   setText('banner-status-text', data._banner_status_text);
   setText('banner-motor-state', data.motor_state ?? '--');

@@ -50,6 +50,18 @@ class TelemetryService:
             except Exception:
                 distance_cm = None
 
+        distance_rear_cm = None
+        if reg.ultrasonic_rear:
+            try:
+                distance_rear_cm = reg.ultrasonic_rear.read_cm()
+            except AttributeError:
+                try:
+                    distance_rear_cm = reg.ultrasonic_rear.measure_distance_cm()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
         steering_angle = getattr(reg.steering, 'angle', state.steering_angle) if reg.steering else state.steering_angle
         pan_angle = getattr(reg.camera_servo, 'pan_angle', state.pan_angle) if reg.camera_servo else state.pan_angle
         tilt_angle = getattr(reg.camera_servo, 'tilt_angle', state.tilt_angle) if reg.camera_servo else state.tilt_angle
@@ -83,6 +95,7 @@ class TelemetryService:
             'battery_percent': battery_percent,
             'distance_cm': distance_cm,
             'distance_status': 'ok' if distance_cm is not None else 'unknown',
+            'distance_rear_cm': distance_rear_cm,
             'motor_state': motor_state['state'],
             'speed': motor_state['speed'],
             'motion_locked': motor_state['motion_locked'],
