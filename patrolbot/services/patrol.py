@@ -156,6 +156,30 @@ class PatrolService:
         self.runtime.state.patrol_metrics['last_turn'] = direction
         return direction
 
+    def _sleep_with_motor_keepalive(self, duration: float, keep_motion: str | None = None, speed: int | None = None):
+        end_time = time.monotonic() + max(0.0, float(duration))
+        motors = self.runtime.registry.motors
+        if keep_motion and motors is not None:
+            refresh_speed = int(speed if speed is not None else self._config.get('speed', 35))
+        else:
+            refresh_speed = None
+        while not self._stop.is_set():
+            remaining = end_time - time.monotonic()
+            if remaining <= 0:
+                break
+            if keep_motion and motors is not None:
+                try:
+                    if keep_motion == 'forward':
+                        motors.forward(refresh_speed)
+                    elif keep_motion == 'backward':
+                        motors.backward(refresh_speed)
+                except RuntimeError:
+                    raise
+                except Exception:
+                    self.logger.exception('Motor keepalive failed during patrol sleep')
+                    raise
+            time.sleep(min(0.2, remaining))
+
     def _turn_once(self, direction: str):
         steering = self.runtime.registry.steering
         motors = self.runtime.registry.motors
@@ -167,11 +191,12 @@ class PatrolService:
             else:
                 steering.right()
             self.runtime.state.steering_angle = steering.angle
-            motors.forward(self._config.get('speed', 35))
+            turn_speed = self._config.get('speed', 35)
+            motors.forward(turn_speed)
             self.runtime.state.motor_state = motors.state
             self.runtime.state.speed = motors.speed
             self.runtime.state.patrol_drive_state = f'turning_{direction}'
-            time.sleep(self._config.get('turn_time_sec', 0.9))
+            self._sleep_with_motor_keepalive(self._config.get('turn_time_sec', 0.9), keep_motion='forward', speed=turn_speed)
         finally:
             steering.center()
             self.runtime.state.steering_angle = steering.angle
@@ -184,28 +209,34 @@ class PatrolService:
         if not motors:
             return
         self.runtime.state.patrol_drive_state = 'reversing'
-        motors.backward(self._config.get('reverse_speed', 28))
+        reverse_speed = self._config.get('reverse_speed', 28)
+        motors.backward(reverse_speed)
         self.runtime.state.motor_state = motors.state
         self.runtime.state.speed = motors.speed
-        time.sleep(self._config.get('reverse_time_sec', 0.8))
+        self._sleep_with_motor_keepalive(self._config.get('reverse_time_sec', 0.8), keep_motion='backward', speed=reverse_speed)
         motors.stop()
         self.runtime.state.motor_state = motors.state
         self.runtime.state.speed = motors.speed
 
-    def _update_scan(self):
+    def _update_scan(self, force: bool = False):
         servo = self.runtime.registry.camera_servo
         if not servo:
             return
+        now = time.monotonic()
+        interval = self._scan_interval_active if self.runtime.state.patrol_enabled else self._scan_interval_idle
+        if not force and (now - self._last_scan_update) < interval:
+            return
+        self._last_scan_update = now
         pan = int(getattr(servo, 'pan_angle', self.runtime.state.pan_angle))
         p_min = self._config.get('scan_pan_min', 45)
         p_max = self._config.get('scan_pan_max', 135)
         step = self._config.get('scan_step', 2)
-        servo.set_tilt(self._config.get('scan_tilt_angle', 90))
+        servo.set_tilt(self._config.get('scan_tilt_angle', 90), log=False)
         pan += step * self._scan_dir
         if pan <= p_min or pan >= p_max:
             self._scan_dir *= -1
             pan = max(p_min, min(p_max, pan))
-        servo.set_pan(pan)
+        servo.set_pan(pan, log=False)
         self.runtime.state.pan_angle = servo.pan_angle
         self.runtime.state.tilt_angle = servo.tilt_angle
 

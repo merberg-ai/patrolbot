@@ -58,24 +58,24 @@ class CameraServoController:
     def _physical_tilt(self, logical_angle: int) -> int:
         return self._clamp_tilt(int(logical_angle) + self.tilt_trim)
 
-    def set_pan(self, angle: int):
+    def set_pan(self, angle: int, log: bool = True):
         logical_angle = self._clamp_pan(angle)
         physical_angle = self._physical_pan(logical_angle)
         if logical_angle == self.pan_angle:
             return
         self.driver.set_servo_angle(self.pan_channel, physical_angle)
         self.pan_angle = logical_angle
-        if self.logger:
+        if self.logger and log:
             self.logger.info("Camera pan angle set to logical=%s physical=%s", self.pan_angle, physical_angle)
 
-    def set_tilt(self, angle: int):
+    def set_tilt(self, angle: int, log: bool = True):
         logical_angle = self._clamp_tilt(angle)
         physical_angle = self._physical_tilt(logical_angle)
         if logical_angle == self.tilt_angle:
             return
         self.driver.set_servo_angle(self.tilt_channel, physical_angle)
         self.tilt_angle = logical_angle
-        if self.logger:
+        if self.logger and log:
             self.logger.info("Camera tilt angle set to logical=%s physical=%s", self.tilt_angle, physical_angle)
 
     def home(self):
