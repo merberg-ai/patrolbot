@@ -8,12 +8,14 @@ function patrolLog(message){
 
 function applyPatrolConfig(cfg){
   const set = (id, val) => { const el = document.getElementById(id); if(el && val !== undefined && val !== null) el.value = val; };
+  const setChecked = (id, val) => { const el = document.getElementById(id); if(el) el.checked = !!val; };
   set('patrol-speed', cfg.speed);
   set('patrol-reverse-speed', cfg.reverse_speed);
   set('patrol-avoid-distance', cfg.avoidance_distance_cm);
   set('patrol-reverse-time', cfg.reverse_time_sec);
   set('patrol-turn-time', cfg.turn_time_sec);
   set('patrol-turn-mode', cfg.turn_mode);
+  setChecked('patrol-scan-on-boot', cfg.scan_on_boot);
   set('patrol-pan-min', cfg.scan_pan_min);
   set('patrol-pan-max', cfg.scan_pan_max);
   set('patrol-scan-step', cfg.scan_step);
@@ -28,6 +30,7 @@ function patrolPayloadFromForm(){
     reverse_time_sec: parseFloat(document.getElementById('patrol-reverse-time').value || '0.8'),
     turn_time_sec: parseFloat(document.getElementById('patrol-turn-time').value || '0.9'),
     turn_mode: document.getElementById('patrol-turn-mode').value,
+    scan_on_boot: !!document.getElementById('patrol-scan-on-boot').checked,
     scan_pan_min: parseInt(document.getElementById('patrol-pan-min').value || '45', 10),
     scan_pan_max: parseInt(document.getElementById('patrol-pan-max').value || '135', 10),
     scan_step: parseInt(document.getElementById('patrol-scan-step').value || '2', 10),
@@ -48,9 +51,18 @@ async function loadPatrolConfig(){
   }
 }
 
+function updatePatrolToggleButton(enabled){
+  const btn = document.getElementById('patrol-toggle');
+  if(!btn) return;
+  btn.textContent = enabled ? 'Stop Patrol' : 'Start Patrol';
+  btn.classList.toggle('danger', !!enabled);
+  btn.classList.toggle('primary', !enabled);
+}
+
 function renderPatrolState(state){
   if(!state) return;
   setText('patrol-enabled', state.enabled ? 'ON' : 'OFF');
+  updatePatrolToggleButton(!!state.enabled);
   setText('patrol-drive-state', state.drive_state || '--');
   setText('patrol-distance', state.metrics && state.metrics.last_distance_cm != null ? `${state.metrics.last_distance_cm} cm` : '--');
   setText('patrol-obstacles', state.metrics && state.metrics.obstacle_count != null ? String(state.metrics.obstacle_count) : '0');
@@ -95,31 +107,24 @@ document.addEventListener('DOMContentLoaded', ()=>{
   const saveBtn = document.getElementById('patrol-save-config');
   if(saveBtn) saveBtn.addEventListener('click', savePatrolConfig);
 
-  const enableBtn = document.getElementById('patrol-enable');
-  if(enableBtn) enableBtn.addEventListener('click', async()=>{
+  const toggleBtn = document.getElementById('patrol-toggle');
+  if(toggleBtn) toggleBtn.addEventListener('click', async()=>{
+    const enabledNow = (document.getElementById('patrol-enabled')?.textContent || '').trim() === 'ON';
     try{
-      await window.patrolbotApi.enablePatrol();
-      patrolLog('Patrol enabled.');
-      setActionMessage('Patrol enabled.', 'success');
+      if(enabledNow){
+        await window.patrolbotApi.disablePatrol();
+        patrolLog('Patrol disabled.');
+        setActionMessage('Patrol disabled.', 'success');
+      }else{
+        await window.patrolbotApi.enablePatrol();
+        patrolLog('Patrol enabled.');
+        setActionMessage('Patrol enabled.', 'success');
+      }
       refreshPatrolState();
       refreshStatus().catch(()=>{});
     }catch(err){
-      patrolLog('Failed to enable patrol.');
-      setActionMessage('Failed to enable patrol.', 'error');
-    }
-  });
-
-  const disableBtn = document.getElementById('patrol-disable');
-  if(disableBtn) disableBtn.addEventListener('click', async()=>{
-    try{
-      await window.patrolbotApi.disablePatrol();
-      patrolLog('Patrol disabled.');
-      setActionMessage('Patrol disabled.', 'success');
-      refreshPatrolState();
-      refreshStatus().catch(()=>{});
-    }catch(err){
-      patrolLog('Failed to disable patrol.');
-      setActionMessage('Failed to disable patrol.', 'error');
+      patrolLog(enabledNow ? 'Failed to disable patrol.' : 'Failed to enable patrol.');
+      setActionMessage(enabledNow ? 'Failed to disable patrol.' : 'Failed to enable patrol.', 'error');
     }
   });
 

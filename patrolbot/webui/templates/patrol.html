@@ -4,8 +4,7 @@
   <div class='card-header'><h2 style='margin:0;'>Patrol Console</h2></div>
   <p class='muted'>Patrolbot 1.0 is a stripped-down autonomous patrol build. No gamepad circus, no tracking lab, just patrol logic, sensors, camera, and survival instincts.</p>
   <div class='button-grid'>
-    <button id='patrol-enable' class='primary'>Start Patrol</button>
-    <button id='patrol-disable'>Stop Patrol</button>
+    <button id='patrol-toggle' class='primary'>Start Patrol</button>
     <button id='patrol-clear-estop'>Clear E-Stop</button>
   </div>
 </section>
@@ -44,6 +43,12 @@
         <option value='left'>Always Left</option>
         <option value='right'>Always Right</option>
       </select>
+    </div>
+    <div><span>Camera Scan On Boot</span>
+      <label style='display:flex; align-items:center; gap:10px; min-height:42px;'>
+        <input id='patrol-scan-on-boot' type='checkbox'>
+        <strong>Enable idle camera scan when patrol is stopped</strong>
+      </label>
     </div>
     <div><span>Scan Pan Min</span><input id='patrol-pan-min' type='number' min='0' max='180' step='1'></div>
     <div><span>Scan Pan Max</span><input id='patrol-pan-max' type='number' min='0' max='180' step='1'></div>

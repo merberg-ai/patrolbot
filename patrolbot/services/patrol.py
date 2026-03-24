@@ -16,6 +16,7 @@ class PatrolService:
         'reverse_time_sec': 0.8,
         'turn_time_sec': 0.9,
         'turn_mode': 'alternate',
+        'scan_on_boot': True,
         'scan_pan_min': 45,
         'scan_pan_max': 135,
         'scan_step': 2,
@@ -45,6 +46,7 @@ class PatrolService:
         cfg['reverse_time_sec'] = max(0.0, min(5.0, float(cfg.get('reverse_time_sec', 0.8))))
         cfg['turn_time_sec'] = max(0.1, min(5.0, float(cfg.get('turn_time_sec', 0.9))))
         cfg['turn_mode'] = str(cfg.get('turn_mode', 'alternate')).strip().lower()
+        cfg['scan_on_boot'] = bool(cfg.get('scan_on_boot', True))
         cfg['scan_pan_min'] = int(cfg.get('scan_pan_min', 45))
         cfg['scan_pan_max'] = int(cfg.get('scan_pan_max', 135))
         if cfg['scan_pan_min'] > cfg['scan_pan_max']:
@@ -237,7 +239,8 @@ class PatrolService:
                 if state.patrol_drive_state != 'stopped' or motors is not None and motors.state != 'stopped':
                     state.patrol_drive_state = 'stopped'
                     self._stop_motion()
-                self._update_scan()
+                if self._config.get('scan_on_boot', True):
+                    self._update_scan()
                 time.sleep(0.1)
                 continue
 

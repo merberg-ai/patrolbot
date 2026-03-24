@@ -111,6 +111,7 @@ patrol:
   reverse_time_sec: 0.8
   turn_time_sec: 0.9
   turn_mode: alternate
+  scan_on_boot: true
   scan_pan_min: 45
   scan_pan_max: 135
   scan_step: 2
