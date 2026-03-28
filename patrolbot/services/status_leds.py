@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import threading
-import time
 
 
 class StatusLedService:
+    PRIORITY = {
+        'BATTERY_CRITICAL': 100,
+        'ERROR': 90,
+        'WIFI_ERROR': 80,
+        'TRAPPED': 70,
+        'OBSTACLE_DETECTED': 60,
+        'TRACKING_ACTIVE': 55,
+        'PATROL_ACTIVE': 50,
+        'WIFI_CONNECTED': 40,
+        'READY': 30,
+        'BOOTING': 10,
+        'OFF': 0,
+    }
+
     def __init__(self, lights, state, config: dict, logger):
         self.lights = lights
         self.state = state
@@ -33,11 +46,14 @@ class StatusLedService:
         self._pattern = None
 
     def _blink_loop(self) -> None:
+        import time
         lights_cfg = self.config.get('lights', {})
         critical_interval = float(lights_cfg.get('critical_blink_interval_s', 0.5))
         police_interval = float(lights_cfg.get('police_interval_s', 0.25))
         red = self.colors.get('battery_critical', [255, 0, 0])
         blue = self.colors.get('police_blue', [0, 0, 255])
+        amber = self.colors.get('obstacle_detected', [255, 180, 0])
+        purple = self.colors.get('trapped', [255, 0, 120])
         off = self.colors.get('off', [0, 0, 0])
         left_red = True
         while not self._stop_event.is_set():
@@ -59,11 +75,25 @@ class StatusLedService:
                 self.state.led_state = 'POLICE'
                 if self._stop_event.wait(police_interval):
                     break
+            elif pattern == 'TRAPPED':
+                self.lights.set_both(*purple)
+                if self._stop_event.wait(critical_interval):
+                    break
+                self.lights.set_both(*amber)
+                if self._stop_event.wait(critical_interval):
+                    break
             else:
                 break
 
-    def set_state(self, state_name: str) -> None:
-        self.current_state = state_name.upper()
+    def set_state(self, state_name: str, reason: str | None = None, force: bool = False) -> None:
+        state_name = (state_name or 'OFF').upper()
+        if not force:
+            current_priority = self.PRIORITY.get(self.current_state, 0)
+            next_priority = self.PRIORITY.get(state_name, 0)
+            if current_priority > next_priority and state_name not in {'READY', 'OFF'}:
+                return
+        self.current_state = state_name
+        self.state.status_led_reason = reason
         if self.current_state != 'CUSTOM':
             self.custom_color = None
         self.apply()
@@ -73,59 +103,37 @@ class StatusLedService:
         self.custom_color = [int(r), int(g), int(b)]
         self.apply()
 
-    def cycle_preset(self) -> None:
-        # These correspond to the exact order of buttons in the Lights UI tab
-        # Off -> Green(READY) -> Red(ERROR) -> Blue(Custom) -> White(Custom) -> Police -> Custom Slot
-        cycle = [
-            {'type': 'state', 'val': 'OFF'},
-            {'type': 'state', 'val': 'READY'},
-            {'type': 'state', 'val': 'ERROR'},
-            {'type': 'color', 'val': [0, 0, 255]},      # Blue
-            {'type': 'color', 'val': [255, 255, 255]},  # White
-            {'type': 'state', 'val': 'POLICE'},
-            {'type': 'custom_slot', 'val': None}        # User's customize slot
-        ]
-        
-        # Determine current index
-        current_index = -1
-        for i, preset in enumerate(cycle):
-            if preset['type'] == 'state' and self.current_state == preset['val']:
-                current_index = i
-                break
-            elif preset['type'] == 'color' and self.current_state == 'CUSTOM' and self.custom_color == preset['val']:
-                current_index = i
-                break
-            elif preset['type'] == 'custom_slot' and self.current_state == 'CUSTOM':
-                # Only match the custom slot if we didn't match the explicitly defined custom colors above
-                current_index = i
-                
-        next_index = (current_index + 1) % len(cycle)
-        next_preset = cycle[next_index]
-        
-        if next_preset['type'] == 'state':
-            self.set_state(next_preset['val'])
-        elif next_preset['type'] == 'color':
-            self.set_custom_color(*next_preset['val'])
-        elif next_preset['type'] == 'custom_slot':
-            # Fallback to purple if they haven't picked a custom color yet, to distinguish from white/blue
-            color = self.custom_color if self.custom_color not in ([0,0,255], [255,255,255], None) else [255, 0, 255]
-            self.set_custom_color(*color)
-
-    def clear_custom(self) -> None:
-        self.custom_color = None
-        self.set_state('READY')
-
     def set_battery_critical(self, active: bool) -> None:
         active = bool(active)
         if self.battery_critical == active:
             return
         self.battery_critical = active
-        if active:
-            self.logger.warning('Battery critical; flashing red eye LEDs')
-            self.apply()
-        else:
-            self.logger.info('Battery no longer critical; restoring LED state')
-            self.apply()
+        self.apply()
+
+    def apply_runtime_status(self, runtime) -> None:
+        state = runtime.state
+        if self.battery_critical:
+            self.set_state('BATTERY_CRITICAL', reason='battery critical', force=True)
+            return
+        if not state.network_connected:
+            self.set_state('WIFI_ERROR', reason='wifi disconnected', force=True)
+            return
+        if state.patrol_drive_state == 'trapped':
+            self.set_state('TRAPPED', reason='patrol trapped', force=True)
+            return
+        if state.patrol_drive_state == 'obstacle_detected':
+            self.set_state('OBSTACLE_DETECTED', reason='obstacle detected', force=True)
+            return
+        if state.tracking_enabled:
+            self.set_state('TRACKING_ACTIVE', reason='tracking active', force=True)
+            return
+        if state.patrol_enabled:
+            self.set_state('PATROL_ACTIVE', reason='patrol active', force=True)
+            return
+        if state.network_connected:
+            self.set_state('READY', reason='ready', force=True)
+            return
+        self.set_state('OFF', reason='idle', force=True)
 
     def apply(self) -> None:
         if self.battery_critical:
@@ -140,6 +148,12 @@ class StatusLedService:
             self._start_pattern('POLICE')
             return
 
+        if self.current_state == 'TRAPPED':
+            self.state.led_state = 'TRAPPED'
+            self.state.led_custom = None
+            self._start_pattern('TRAPPED')
+            return
+
         self._stop_pattern()
 
         if self.current_state == 'CUSTOM' and self.custom_color is not None:
@@ -150,7 +164,6 @@ class StatusLedService:
         self.lights.set_both(*color)
         self.state.led_state = self.current_state
         self.state.led_custom = None if self.custom_color is None else {'r': color[0], 'g': color[1], 'b': color[2]}
-        self.logger.info('LED state applied: %s -> %s', self.current_state, color)
 
     def close(self) -> None:
         self._stop_pattern()

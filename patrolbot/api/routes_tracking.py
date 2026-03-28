@@ -5,6 +5,58 @@ from flask import Flask, current_app, request
 from patrolbot.config import load_runtime_config, save_runtime_config
 
 
+TRACKING_DEFAULTS = {
+    'enabled': False,
+    'mode': 'camera_track',
+    'detector': 'face',
+    'target_label': '',
+    'yolo_model': 'yolov8n.pt',
+    'enable_yolo': False,
+    'yolo_imgsz': 320,
+    'yolo_classes': [],
+    'confidence_min': 0.45,
+    'max_results': 20,
+    'min_area': 1500,
+    'min_target_area': 900,
+    'pan_gain': 0.06,
+    'tilt_gain': 0.06,
+    'x_deadzone_px': 48,
+    'y_deadzone_px': 36,
+    'smoothing_alpha': 0.4,
+    'scan_when_lost': True,
+    'scan_step': 2,
+    'scan_tilt_step': 0,
+    'lost_timeout_s': 1.5,
+    'process_every_n_frames': 3,
+    'box_padding_px': 8,
+    'show_labels': True,
+    'show_crosshair': True,
+    'show_metrics_overlay': True,
+    'preferred_target': 'largest',
+    'overlay_enabled': True,
+    'show_confidence_bar': True,
+    'invert_error_x': False,
+    'invert_error_y': False,
+    'invert_pan_error': False,
+    'follow_target_distance_cm': 60,
+    'follow_distance_tolerance_cm': 15,
+    'follow_drive_speed': 30,
+    'follow_steer_gain': 0.4,
+    'follow_use_ultrasonic': False,
+    'follow_stop_distance_cm': 25,
+    'follow_image_size_ratio_target': 0.25,
+    'follow_image_size_tolerance': 0.06,
+}
+
+
+def _normalize_tracking_config(source: dict | None) -> dict:
+    cfg = dict(TRACKING_DEFAULTS)
+    cfg.update(source or {})
+    cfg['enable_yolo'] = bool(cfg.get('enable_yolo', False))
+    cfg['yolo_classes'] = list(cfg.get('yolo_classes') or [])
+    return cfg
+
+
 def _servo_payload(runtime):
     servo = getattr(runtime.registry, 'camera_servo', None)
     if not servo:
@@ -68,13 +120,13 @@ def register_tracking_routes(app: Flask) -> None:
     @app.get('/api/tracking/config')
     def tracking_config():
         runtime = current_app.config['PATROLBOT_RUNTIME']
-        cfg = runtime.tracking.get_config() if runtime.tracking else dict(runtime.config.get('tracking', {}))
+        cfg = runtime.tracking.get_config() if runtime.tracking else _normalize_tracking_config(runtime.config.get('tracking', {}))
         return {'ok': True, 'config': cfg, 'servo': _servo_payload(runtime), 'camera': _camera_payload(runtime)}
 
     @app.get('/api/tracking/detectors')
     def tracking_detectors():
         runtime = current_app.config['PATROLBOT_RUNTIME']
-        details = runtime.tracking.get_detector_details() if runtime.tracking else {}
+        details = runtime.tracking.get_detector_details() if runtime.tracking else runtime.state.tracking_detector_details
         return {'ok': True, 'details': details}
 
     @app.get('/api/tracking/debug')
@@ -110,10 +162,18 @@ def register_tracking_routes(app: Flask) -> None:
         runtime = current_app.config['PATROLBOT_RUNTIME']
         payload = request.get_json(force=True, silent=True) or {}
         tracking_patch = payload.get('tracking', payload)
-        if not runtime.tracking:
-            return {'ok': False, 'error': 'tracking service unavailable'}, 503
-        normalized, warnings = runtime.tracking.update_config(tracking_patch, persist=True)
-
+        if runtime.tracking:
+            normalized, warnings = runtime.tracking.update_config(tracking_patch, persist=True)
+        else:
+            normalized = _normalize_tracking_config({**runtime.config.get('tracking', {}), **tracking_patch})
+            runtime.config['tracking'] = dict(normalized)
+            runtime_cfg = load_runtime_config()
+            runtime_cfg['tracking'] = dict(normalized)
+            warnings = ['tracking service not initialized; config saved only']
+            save_runtime_config(runtime_cfg)
+            runtime.state.tracking_mode = normalized.get('mode', runtime.state.tracking_mode)
+            runtime.state.tracking_detector = normalized.get('detector', runtime.state.tracking_detector)
+            runtime.state.tracking_preferred_target = normalized.get('preferred_target', runtime.state.tracking_preferred_target)
         runtime_cfg = load_runtime_config()
         if 'servo' in payload and isinstance(payload['servo'], dict):
             runtime_cfg['servo'] = dict(payload['servo'])
@@ -127,22 +187,25 @@ def register_tracking_routes(app: Flask) -> None:
     @app.post('/api/tracking/toggle')
     def tracking_toggle():
         runtime = current_app.config['PATROLBOT_RUNTIME']
-        if runtime.tracking:
-            runtime.tracking.toggle()
+        if not runtime.tracking:
+            return {'ok': False, 'error': 'tracking service unavailable in phase 1'}, 503
+        runtime.tracking.toggle()
         return {'ok': True, 'enabled': runtime.state.tracking_enabled}
 
     @app.post('/api/tracking/enable')
     def tracking_enable():
         runtime = current_app.config['PATROLBOT_RUNTIME']
-        if runtime.tracking:
-            runtime.tracking.enable()
+        if not runtime.tracking:
+            return {'ok': False, 'error': 'tracking service unavailable in phase 1'}, 503
+        runtime.tracking.enable()
         return {'ok': True, 'enabled': runtime.state.tracking_enabled}
 
     @app.post('/api/tracking/disable')
     def tracking_disable():
         runtime = current_app.config['PATROLBOT_RUNTIME']
-        if runtime.tracking:
-            runtime.tracking.disable()
+        if not runtime.tracking:
+            return {'ok': False, 'error': 'tracking service unavailable in phase 1'}, 503
+        runtime.tracking.disable()
         return {'ok': True, 'enabled': runtime.state.tracking_enabled}
 
     @app.post('/api/tracking/servo/home')

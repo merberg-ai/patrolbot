@@ -6,6 +6,9 @@
     <div><span>IP Address</span><strong id='system-ip'>--</strong></div>
     <div><span>Mode</span><strong id='system-mode'>--</strong></div>
     <div><span>LED State</span><strong id='system-led'>--</strong></div>
+    <div><span>Wi‑Fi</span><strong id='system-wifi'>--</strong></div>
+    <div><span>Camera</span><strong id='system-camera'>--</strong></div>
+    <div><span>Tracking Service</span><strong id='system-tracking-service'>--</strong></div>
   </div>
 </section>
 
@@ -21,6 +24,33 @@
     <div><span>Working Tree</span><strong id='ver-dirty'>--</strong></div>
   </div>
   <p id='ver-message' class='muted' style='display:none;'></p>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Log Viewer</h2></div>
+  <div class='button-grid'>
+    <select id='log-line-limit'>
+      <option value='100'>100 lines</option>
+      <option value='250' selected>250 lines</option>
+      <option value='500'>500 lines</option>
+    </select>
+    <button id='logs-refresh'>Refresh</button>
+    <button id='logs-toggle-auto'>Pause Auto Refresh</button>
+    <button id='logs-copy'>Copy Logs</button>
+  </div>
+  <pre id='system-log-viewer' style='margin:0; min-height:220px; max-height:340px; overflow:auto; background:#0b1116; color:#9fffe7; border:1px solid var(--border); border-radius:10px; padding:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.82rem; white-space:pre-wrap;'></pre>
+  <p id='logs-message' class='muted'>Loading logs…</p>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Snapshots</h2></div>
+  <div class='button-grid'>
+    <button id='snapshots-refresh'>Refresh Snapshots</button>
+    <button id='snapshots-delete-all' class='danger'>Delete All Snapshots</button>
+  </div>
+  <div id='snapshot-list' class='status-grid'></div>
+  <img id='snapshot-preview' class='camera-stream' alt='Snapshot preview' style='display:none; margin-top:14px;'>
+  <p id='snapshots-message' class='muted'>Loading snapshots…</p>
 </section>
 
 <section class='card'>

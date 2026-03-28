@@ -2,6 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from patrolbot.services.status_leds import StatusLedService
 from patrolbot.state import RuntimeState
+
+
 @dataclass
 class HardwareRegistry:
     hat: object | None = None
@@ -14,6 +16,8 @@ class HardwareRegistry:
     battery: object | None = None
     switches: object | None = None
     camera: object | None = None
+
+
 @dataclass
 class RuntimeContext:
     config: dict
@@ -25,3 +29,5 @@ class RuntimeContext:
     gamepad: object | None = None
     tracking: object | None = None
     patrol: object | None = None
+    network_status: object | None = None
+    snapshots: object | None = None

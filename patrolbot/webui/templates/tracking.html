@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+{% block content %}
+<div id='help-tooltip' style='display:none; position:fixed; z-index:9999; max-width:280px; background:#0b1116; color:#d7fff2; border:1px solid rgba(255,255,255,.14); border-radius:10px; padding:10px 12px; box-shadow:0 12px 30px rgba(0,0,0,.35); font-size:.85rem;'></div>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Tracking Status</h2></div>
+  <p class='muted'>Phase 1 reconnects the full tracking control panel and config surface. The actual tracking service stays parked until phase 2 so the robot does not suddenly grow bad ideas.</p>
+  <div class='status-grid'>
+    <div><span>Status</span><strong id='status-pill-local'>Idle</strong></div>
+    <div><span>Detector</span><strong id='detector-name'>detector: --</strong></div>
+    <div><span>Detections</span><strong id='detect-count'>detections: --</strong></div>
+    <div><span>FPS</span><strong id='fps-stat'>fps: --</strong></div>
+    <div><span>Target</span><strong id='target-stat'>None</strong></div>
+    <div><span>Detector Status</span><strong id='detector-status'>--</strong></div>
+    <div><span>Detector Health</span><strong id='detector-health'>--</strong></div>
+    <div><span>Scan</span><strong id='scan-stat'>--</strong></div>
+    <div><span>Servo</span><strong id='servo-stat'>P -- / T --</strong></div>
+    <div><span>Servo Driver</span><strong id='servo-driver'>--</strong></div>
+    <div id='follow-distance-row'><span>Follow Distance</span><strong id='follow-distance-stat'>--</strong></div>
+    <div id='follow-drive-row'><span>Follow State</span><strong id='follow-drive-stat'>--</strong></div>
+  </div>
+  <div id='follow-stat' class='muted' style='display:none; margin-top:10px;'></div>
+  <div class='button-grid'>
+    <button id='toggle-tracking' class='primary'>Enable Tracking</button>
+    <button id='refresh-now'>Refresh Now</button>
+  </div>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Detector</h2></div>
+  <div class='status-grid'>
+    <div><span>Tracking Mode</span>
+      <select id='tracking_mode'>
+        <option value='camera_track'>Camera Track</option>
+        <option value='object_follow'>Object Follow</option>
+      </select>
+    </div>
+    <div><span>Detector</span>
+      <select id='detector'>
+        <option value='face'>Face</option>
+        <option value='body'>Body</option>
+        <option value='motion'>Motion</option>
+        <option value='yolo'>YOLO Objects</option>
+      </select>
+    </div>
+    <div><span>Enable YOLO</span><select id='enable_yolo'><option value='false'>No</option><option value='true'>Yes</option></select></div>
+    <div><span>Preferred Target</span><select id='preferred_target'><option value='largest'>Largest</option><option value='center'>Center</option></select></div>
+    <div><span>Target Label</span><input id='target_label' type='text'></div>
+    <div><span>YOLO Model</span><input id='yolo_model' type='text'></div>
+    <div><span>YOLO Classes</span><input id='yolo_classes' type='text' placeholder='person,cat,dog'></div>
+    <div><span>YOLO Image Size</span><input id='yolo_imgsz' type='number' min='160' max='1280' step='32'></div>
+    <div><span>Confidence Min</span><input id='confidence_min' type='number' min='0' max='1' step='0.01'></div>
+    <div><span>Max Results</span><input id='max_results' type='number' min='1' max='100' step='1'></div>
+    <div><span>Min Area</span><input id='min_area' type='number' min='0' max='999999' step='1'></div>
+    <div><span>Min Target Area</span><input id='min_target_area' type='number' min='0' max='999999' step='1'></div>
+    <div><span>Process Every N Frames</span><input id='process_every_n_frames' type='number' min='1' max='30' step='1'></div>
+    <div><span>Box Padding</span><input id='box_padding_px' type='number' min='0' max='200' step='1'></div>
+  </div>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Servo Tracking</h2></div>
+  <div class='status-grid'>
+    <div><span>Pan Gain</span><input id='pan_gain' type='number' min='0' max='2' step='0.01'></div>
+    <div><span>Tilt Gain</span><input id='tilt_gain' type='number' min='0' max='2' step='0.01'></div>
+    <div><span>X Deadzone (px)</span><input id='x_deadzone_px' type='number' min='0' max='500' step='1'></div>
+    <div><span>Y Deadzone (px)</span><input id='y_deadzone_px' type='number' min='0' max='500' step='1'></div>
+    <div><span>Smoothing Alpha</span><input id='smoothing_alpha' type='number' min='0' max='1' step='0.01'></div>
+    <div><span>Lost Timeout (s)</span><input id='lost_timeout_s' type='number' min='0' max='10' step='0.1'></div>
+    <div><span>Scan When Lost</span><select id='scan_when_lost'><option value='true'>Yes</option><option value='false'>No</option></select></div>
+    <div><span>Scan Step</span><input id='scan_step' type='number' min='0' max='30' step='1'></div>
+    <div><span>Scan Tilt Step</span><input id='scan_tilt_step' type='number' min='0' max='30' step='1'></div>
+    <div><span>Show Labels</span><select id='show_labels'><option value='true'>Yes</option><option value='false'>No</option></select></div>
+    <div><span>Crosshair</span><select id='show_crosshair'><option value='true'>Yes</option><option value='false'>No</option></select></div>
+    <div><span>Metrics Overlay</span><select id='show_metrics_overlay'><option value='true'>Yes</option><option value='false'>No</option></select></div>
+    <div><span>Confidence Bar</span><select id='show_confidence_bar'><option value='true'>Yes</option><option value='false'>No</option></select></div>
+    <div><span>Invert X Error</span><select id='invert_error_x'><option value='false'>No</option><option value='true'>Yes</option></select></div>
+    <div><span>Invert Y Error</span><select id='invert_error_y'><option value='false'>No</option><option value='true'>Yes</option></select></div>
+    <div><span>Invert Pan Error</span><select id='invert_pan_error'><option value='false'>No</option><option value='true'>Yes</option></select></div>
+  </div>
+</section>
+
+<section class='card' id='follow-settings-section'>
+  <div class='card-header'><h2 style='margin:0;'>Object Follow</h2></div>
+  <div class='status-grid'>
+    <div><span>Target Distance (cm)</span><input id='follow_target_distance_cm' type='number' min='5' max='500' step='1'></div>
+    <div><span>Distance Tolerance (cm)</span><input id='follow_distance_tolerance_cm' type='number' min='0' max='200' step='1'></div>
+    <div><span>Drive Speed</span><input id='follow_drive_speed' type='number' min='0' max='100' step='1'></div>
+    <div><span>Steer Gain</span><input id='follow_steer_gain' type='number' min='0' max='5' step='0.01'></div>
+    <div><span>Stop Distance (cm)</span><input id='follow_stop_distance_cm' type='number' min='0' max='500' step='1'></div>
+    <div><span>Use Ultrasonic</span><select id='follow_use_ultrasonic'><option value='false'>No</option><option value='true'>Yes</option></select></div>
+    <div><span>Image Size Ratio Target</span><input id='follow_image_size_ratio_target' type='number' min='0' max='1' step='0.01'></div>
+    <div><span>Image Size Ratio Tolerance</span><input id='follow_image_size_tolerance' type='number' min='0' max='1' step='0.01'></div>
+  </div>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Servo Controls</h2></div>
+  <div class='status-grid'>
+    <div><span>Manual Pan</span><input id='manual_pan' type='number' min='0' max='180' step='1'></div>
+    <div><span>Manual Tilt</span><input id='manual_tilt' type='number' min='0' max='180' step='1'></div>
+    <div><span>Pan Trim</span><input id='pan_trim' type='number' min='-20' max='20' step='1'></div>
+    <div><span>Tilt Trim</span><input id='tilt_trim' type='number' min='-20' max='20' step='1'></div>
+    <div><span>Logical Pan</span><strong id='logical-pan-readout'>--</strong></div>
+    <div><span>Logical Tilt</span><strong id='logical-tilt-readout'>--</strong></div>
+    <div><span>Physical Pan</span><strong id='physical-pan-readout'>--</strong></div>
+    <div><span>Physical Tilt</span><strong id='physical-tilt-readout'>--</strong></div>
+  </div>
+  <div class='button-grid'>
+    <button id='servo-home'>Home Servo</button>
+    <button id='apply-servo'>Apply Servo</button>
+    <button data-nudge='left'>Left</button>
+    <button data-nudge='right'>Right</button>
+    <button data-nudge='up'>Up</button>
+    <button data-nudge='down'>Down</button>
+  </div>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Tracking Camera</h2></div>
+  <img id='tracking-camera-preview' class='camera-stream' src='/video_feed?view=tracking' alt='Tracking camera feed'>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Tracking Console</h2></div>
+  <div class='button-grid'>
+    <button id='save-config' class='primary'>Save Tracking Config</button>
+    <button id='clear-console'>Clear Console</button>
+    <button id='copy-console'>Copy Console</button>
+    <button id='copy-debug'>Copy Debug</button>
+  </div>
+  <pre id='console' style='margin:0; min-height:180px; max-height:280px; overflow:auto; background:#0b1116; color:#9fffe7; border:1px solid var(--border); border-radius:10px; padding:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.85rem; white-space:pre-wrap;'></pre>
+</section>
+{% endblock %}

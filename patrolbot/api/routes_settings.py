@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import time
+
 from flask import Flask, current_app, request
 
 from patrolbot.config import DEFAULT_CONFIG_PATH, load_runtime_config, save_runtime_config
+from patrolbot.hardware.ultrasonic import UltrasonicSensor
 from patrolbot.services.camera_settings import (
     build_camera_settings_from_config,
     metadata_for_response,
@@ -35,6 +38,64 @@ def _apply_camera_settings(runtime, normalized: dict):
         'warnings': list(apply_result.get('warnings', [])),
         **metadata_for_response(),
     }
+
+
+def _sensor_slot(config_key: str) -> str:
+    return 'front_ultrasonic' if config_key == 'ultrasonic' else 'rear_ultrasonic'
+
+
+def _sensor_registry_attr(config_key: str) -> str:
+    return 'ultrasonic' if config_key == 'ultrasonic' else 'ultrasonic_rear'
+
+
+def _probe_sensor(runtime, config_key: str) -> dict:
+    slot = _sensor_slot(config_key)
+    reg_attr = _sensor_registry_attr(config_key)
+    current = getattr(runtime.registry, reg_attr, None)
+    if current and hasattr(current, 'close'):
+        try:
+            current.close()
+        except Exception:
+            pass
+    probe_data = {
+        'initialized': False,
+        'detected': False,
+        'healthy': False,
+        'available': False,
+        'last_error': None,
+        'details': None,
+        'last_probe_ts': time.time(),
+    }
+    sensor = None
+    try:
+        sensor = UltrasonicSensor(runtime.config, runtime.logger, config_key=config_key)
+        probe_data.update(sensor.probe(reads=3, valid_reads_required=1))
+        probe_data['available'] = bool(probe_data.get('detected'))
+    except Exception as exc:
+        probe_data['last_error'] = str(exc)
+        probe_data['details'] = None
+    entry = runtime.state.sensor_status.setdefault(slot, {})
+    entry.update(probe_data)
+    if probe_data.get('detected'):
+        setattr(runtime.registry, reg_attr, sensor)
+    else:
+        setattr(runtime.registry, reg_attr, None)
+        if sensor and hasattr(sensor, 'close'):
+            sensor.close()
+    return dict(entry)
+
+
+def _sensor_payload(runtime, config_key: str) -> dict:
+    slot = _sensor_slot(config_key)
+    entry = dict(runtime.state.sensor_status.get(slot, {}))
+    cfg = runtime.config.get(config_key, {}) or {}
+    entry['config_key'] = config_key
+    entry['trigger_pin'] = cfg.get('trigger_pin')
+    entry['echo_pin'] = cfg.get('echo_pin')
+    entry['configured'] = bool(cfg.get('enabled', config_key == 'ultrasonic'))
+    entry['use_mode'] = str(cfg.get('use_mode', entry.get('use_mode', 'off')))
+    entry['enabled'] = bool(entry.get('configured') and entry.get('use_mode') != 'off' and entry.get('detected'))
+    return entry
 
 
 def register_settings_routes(app: Flask) -> None:
@@ -121,3 +182,80 @@ def register_settings_routes(app: Flask) -> None:
         result = _apply_camera_settings(runtime, normalized)
         result['warnings'] = warnings + result.get('warnings', [])
         return result
+
+    @app.get('/api/settings/system')
+    def get_system_settings():
+        runtime = current_app.config['PATROLBOT_RUNTIME']
+        return {
+            'ok': True,
+            'start_patrol_on_boot': bool(runtime.config.get('patrol', {}).get('enabled', False)),
+            'network': {
+                'connected': runtime.state.network_connected,
+                'ssid': runtime.state.network_ssid,
+                'ip': runtime.state.network_ip,
+                'last_error': runtime.state.network_last_error,
+            },
+        }
+
+    @app.post('/api/settings/system')
+    def save_system_settings():
+        runtime = current_app.config['PATROLBOT_RUNTIME']
+        payload = request.get_json(force=True, silent=True) or {}
+        start_patrol_on_boot = bool(payload.get('start_patrol_on_boot', runtime.config.get('patrol', {}).get('enabled', False)))
+        runtime.config.setdefault('patrol', {})['enabled'] = start_patrol_on_boot
+        runtime_cfg = load_runtime_config()
+        runtime_cfg.setdefault('patrol', {})['enabled'] = start_patrol_on_boot
+        save_runtime_config(runtime_cfg)
+        if runtime.patrol:
+            runtime.patrol.update_config({'enabled': start_patrol_on_boot}, persist=False)
+        return {'ok': True, 'start_patrol_on_boot': start_patrol_on_boot}
+
+    @app.get('/api/settings/sensors')
+    def get_sensor_settings():
+        runtime = current_app.config['PATROLBOT_RUNTIME']
+        return {
+            'ok': True,
+            'front_ultrasonic': _sensor_payload(runtime, 'ultrasonic'),
+            'rear_ultrasonic': _sensor_payload(runtime, 'ultrasonic_rear'),
+        }
+
+    @app.post('/api/settings/sensors')
+    def save_sensor_settings():
+        runtime = current_app.config['PATROLBOT_RUNTIME']
+        payload = request.get_json(force=True, silent=True) or {}
+        runtime_cfg = load_runtime_config()
+        updated = {}
+        for config_key in ('ultrasonic', 'ultrasonic_rear'):
+            patch = payload.get(config_key)
+            if not isinstance(patch, dict):
+                continue
+            cfg = dict(runtime.config.get(config_key, {}) or {})
+            cfg.update(patch)
+            use_mode = str(cfg.get('use_mode', 'off')).strip().lower()
+            if use_mode not in {'off', 'safety_only', 'fusion'}:
+                use_mode = 'off'
+            entry = runtime.state.sensor_status.setdefault(_sensor_slot(config_key), {})
+            if use_mode != 'off' and not entry.get('detected'):
+                return {'ok': False, 'error': f'{config_key} is not detected. Probe it before enabling.'}, 400
+            cfg['use_mode'] = use_mode
+            cfg['enabled'] = bool(cfg.get('enabled', config_key == 'ultrasonic'))
+            runtime.config[config_key] = cfg
+            runtime_cfg[config_key] = dict(cfg)
+            entry['configured'] = bool(cfg.get('enabled', False))
+            entry['use_mode'] = use_mode
+            entry['enabled'] = bool(entry['configured'] and use_mode != 'off' and entry.get('detected'))
+            updated[config_key] = _sensor_payload(runtime, config_key)
+        save_runtime_config(runtime_cfg)
+        return {'ok': True, **updated}
+
+    @app.post('/api/settings/sensors/probe')
+    def probe_sensors():
+        runtime = current_app.config['PATROLBOT_RUNTIME']
+        payload = request.get_json(force=True, silent=True) or {}
+        target = str(payload.get('target', 'all')).strip().lower()
+        results = {}
+        if target in {'all', 'front', 'ultrasonic'}:
+            results['front_ultrasonic'] = _probe_sensor(runtime, 'ultrasonic')
+        if target in {'all', 'rear', 'ultrasonic_rear'}:
+            results['rear_ultrasonic'] = _probe_sensor(runtime, 'ultrasonic_rear')
+        return {'ok': True, **results}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 
 class TelemetryService:
@@ -30,6 +31,49 @@ class TelemetryService:
             except Exception as exc:
                 self.logger.warning('Telemetry background poll failed: %s', exc)
 
+    def _sensor_entry(self, slot: str) -> dict:
+        return self.runtime.state.sensor_status.setdefault(slot, {
+            'configured': False,
+            'initialized': False,
+            'detected': False,
+            'healthy': False,
+            'enabled': False,
+            'use_mode': 'off',
+            'available': False,
+            'last_distance_cm': None,
+            'last_good_read_ts': None,
+            'last_probe_ts': None,
+            'last_error': None,
+            'details': None,
+        })
+
+    def _read_sensor(self, registry_attr: str, slot: str):
+        sensor = getattr(self.runtime.registry, registry_attr, None)
+        entry = self._sensor_entry(slot)
+        if not sensor:
+            entry['initialized'] = False
+            entry['healthy'] = False
+            entry['available'] = bool(entry.get('detected'))
+            return None
+        try:
+            distance = sensor.read_cm() if hasattr(sensor, 'read_cm') else sensor.measure_distance_cm()
+            entry['initialized'] = True
+            if distance is None:
+                entry['healthy'] = False
+                return None
+            entry['detected'] = True
+            entry['healthy'] = True
+            entry['available'] = True
+            entry['last_distance_cm'] = distance
+            entry['last_good_read_ts'] = time.time()
+            entry['last_error'] = None
+            return round(float(distance), 1)
+        except Exception as exc:
+            entry['initialized'] = True
+            entry['healthy'] = False
+            entry['last_error'] = str(exc)
+            return None
+
     def poll_once(self) -> dict:
         reg = self.runtime.registry
         state = self.runtime.state
@@ -39,28 +83,14 @@ class TelemetryService:
         battery_percent = reg.battery.estimate_percent(battery_voltage) if reg.battery else None
 
         distance_cm = None
-        if reg.ultrasonic:
-            try:
-                distance_cm = reg.ultrasonic.read_cm()
-            except AttributeError:
-                try:
-                    distance_cm = reg.ultrasonic.measure_distance_cm()
-                except Exception:
-                    distance_cm = None
-            except Exception:
-                distance_cm = None
+        front_status = self._sensor_entry('front_ultrasonic')
+        if front_status.get('enabled') and front_status.get('use_mode') != 'off':
+            distance_cm = self._read_sensor('ultrasonic', 'front_ultrasonic')
 
         distance_rear_cm = None
-        if reg.ultrasonic_rear:
-            try:
-                distance_rear_cm = reg.ultrasonic_rear.read_cm()
-            except AttributeError:
-                try:
-                    distance_rear_cm = reg.ultrasonic_rear.measure_distance_cm()
-                except Exception:
-                    pass
-            except Exception:
-                pass
+        rear_status = self._sensor_entry('rear_ultrasonic')
+        if rear_status.get('enabled') and rear_status.get('use_mode') != 'off':
+            distance_rear_cm = self._read_sensor('ultrasonic_rear', 'rear_ultrasonic')
 
         steering_angle = getattr(reg.steering, 'angle', state.steering_angle) if reg.steering else state.steering_angle
         pan_angle = getattr(reg.camera_servo, 'pan_angle', state.pan_angle) if reg.camera_servo else state.pan_angle
@@ -77,8 +107,21 @@ class TelemetryService:
             state.motion_locked = reg.motors.motion_locked
             state.estop_latched = reg.motors.estop_latched
 
+        if self.runtime.network_status is not None:
+            if not getattr(self, '_network_next_due', None) or time.time() >= self._network_next_due:
+                net = self.runtime.network_status.get_status()
+                state.network_connected = bool(net.get('connected'))
+                state.network_ssid = net.get('ssid')
+                state.network_ip = net.get('ip')
+                state.network_last_error = net.get('error')
+                self._network_next_due = time.time() + 10.0
+
         if self.runtime.status_leds is not None:
             self.runtime.status_leds.set_battery_critical(battery_status == 'critical')
+            self.runtime.status_leds.apply_runtime_status(self.runtime)
+
+        if self.runtime.snapshots is not None:
+            state.snapshot_count = len(self.runtime.snapshots.list_snapshots(limit=9999))
 
         motor_state = reg.motors.get_state() if reg.motors else {
             'state': state.motor_state,
@@ -108,6 +151,26 @@ class TelemetryService:
             'led_state': state.led_state,
             'led_custom': state.led_custom,
             'mode': state.mode,
+            'system_status': state.system_status,
+            'network': {
+                'connected': state.network_connected,
+                'ssid': state.network_ssid,
+                'ip': state.network_ip,
+                'last_error': state.network_last_error,
+            },
+            'sensors': {
+                'front_ultrasonic': dict(front_status),
+                'rear_ultrasonic': dict(rear_status),
+            },
+            'tracking': {
+                'enabled': state.tracking_enabled,
+                'mode': state.tracking_mode,
+                'detector': state.tracking_detector,
+                'detector_status': state.tracking_detector_status,
+                'detector_available': state.tracking_detector_available,
+                'last_error': state.tracking_last_error,
+                'disable_reason': state.tracking_disable_reason,
+            },
             'patrol_enabled': state.patrol_enabled,
             'patrol': {
                 'enabled': state.patrol_enabled,
@@ -120,6 +183,10 @@ class TelemetryService:
                 'metrics': state.patrol_metrics,
                 'disable_reason': state.patrol_disable_reason,
                 'last_error': state.patrol_last_error,
+            },
+            'snapshots': {
+                'count': state.snapshot_count,
+                'last_saved': state.snapshot_last_saved,
             },
             'gamepad_connected': False,
         }

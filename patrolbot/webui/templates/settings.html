@@ -1,6 +1,83 @@
 {% extends 'base.html' %}
 {% block content %}
 <section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Boot & System</h2></div>
+  <p class='muted'>Boot-time behavior belongs here, not buried in patrol tuning like a gremlin.</p>
+  <div class='status-grid'>
+    <div>
+      <span>Start Patrol Automatically On Boot</span>
+      <label style='display:flex; align-items:center; gap:10px; min-height:42px;'>
+        <input id='start-patrol-on-boot' type='checkbox'>
+        <strong>Enable autonomous patrol after startup</strong>
+      </label>
+    </div>
+  </div>
+  <div class='button-grid'>
+    <button id='save-system-settings' class='primary'>Save Boot Settings</button>
+  </div>
+  <p id='system-settings-message' class='muted'>Loading boot settings…</p>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Wi‑Fi Manager</h2></div>
+  <div class='status-grid'>
+    <div><span>Connected</span><strong id='wifi-connected'>--</strong></div>
+    <div><span>SSID</span><strong id='wifi-ssid'>--</strong></div>
+    <div><span>IP Address</span><strong id='wifi-ip'>--</strong></div>
+  </div>
+  <div class='status-grid'>
+    <div><span>Network</span><select id='wifi-network-select'></select></div>
+    <div><span>Password</span><input id='wifi-password' type='password' placeholder='optional if remembered'></div>
+  </div>
+  <div class='button-grid'>
+    <button id='wifi-refresh'>Refresh Status</button>
+    <button id='wifi-scan'>Scan Networks</button>
+    <button id='wifi-connect' class='primary'>Connect</button>
+  </div>
+  <p id='wifi-message' class='muted'>Wi‑Fi status loading…</p>
+</section>
+
+<section class='card'>
+  <div class='card-header'><h2 style='margin:0;'>Sensor Configuration</h2></div>
+  <p class='muted'>Detected, enabled, and actually healthy are three different things. The UI now admits that.</p>
+  <div class='status-grid'>
+    <div>
+      <span>Front Ultrasonic Status</span>
+      <strong id='sensor-front-status'>--</strong>
+      <small id='sensor-front-detail' class='muted'></small>
+    </div>
+    <div>
+      <span>Front Use Mode</span>
+      <select id='sensor-front-mode'>
+        <option value='off'>Off</option>
+        <option value='safety_only'>Safety Only</option>
+        <option value='fusion'>Fusion</option>
+      </select>
+    </div>
+    <div>
+      <span>Rear Ultrasonic Status</span>
+      <strong id='sensor-rear-status'>--</strong>
+      <small id='sensor-rear-detail' class='muted'></small>
+    </div>
+    <div>
+      <span>Rear Use Mode</span>
+      <select id='sensor-rear-mode'>
+        <option value='off'>Off</option>
+        <option value='safety_only'>Safety Only</option>
+        <option value='fusion'>Fusion</option>
+      </select>
+    </div>
+  </div>
+  <div class='button-grid'>
+    <button id='probe-front-sensor'>Probe Front Sensor</button>
+    <button id='probe-rear-sensor'>Probe Rear Sensor</button>
+    <button id='probe-all-sensors'>Probe Again</button>
+    <button id='save-sensor-settings' class='primary'>Save Sensor Settings</button>
+  </div>
+  <p id='sensor-settings-message' class='muted'>Loading sensor status…</p>
+</section>
+
+<section class='card'>
   <div class='card-header'><h2 style='margin:0;'>Servo Trim</h2></div>
   <p class='muted'>Fine-tune steering and camera alignment without touching code.</p>
   <div class='status-grid'>

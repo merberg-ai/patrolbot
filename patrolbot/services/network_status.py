@@ -1,9 +1,25 @@
 from __future__ import annotations
-import socket
+
+from patrolbot.services.network_manager import NetworkManager
+
+
 class NetworkStatusService:
-    def get_ip(self) -> str:
+    def __init__(self, logger):
+        self.logger = logger
+        self.manager = NetworkManager(logger)
+
+    def get_status(self) -> dict:
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(('8.8.8.8', 80)); return s.getsockname()[0]
-        except OSError:
-            return '127.0.0.1'
+            status = self.manager.get_status()
+            status.setdefault('connected', False)
+            status.setdefault('ssid', None)
+            status.setdefault('ip', '127.0.0.1')
+            status.setdefault('error', None)
+            return status
+        except Exception as exc:
+            return {
+                'connected': False,
+                'ssid': None,
+                'ip': '127.0.0.1',
+                'error': str(exc),
+            }

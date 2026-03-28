@@ -69,6 +69,7 @@ class PatrolService:
         state.patrol_targets = []
         metrics = state.patrol_metrics if isinstance(state.patrol_metrics, dict) else {}
         metrics.setdefault('last_distance_cm', None)
+        metrics.setdefault('last_rear_distance_cm', None)
         metrics.setdefault('obstacle_count', 0)
         metrics.setdefault('last_turn', None)
         metrics.setdefault('loop_hz', 0.0)
@@ -136,18 +137,22 @@ class PatrolService:
             self.runtime.state.motor_state = motors.state
             self.runtime.state.speed = motors.speed
 
+    def _sensor_enabled(self, slot: str) -> bool:
+        entry = self.runtime.state.sensor_status.get(slot, {})
+        return bool(entry.get('enabled')) and entry.get('use_mode') != 'off' and entry.get('detected')
+
     def _measure_distance(self):
+        if not self._sensor_enabled('front_ultrasonic'):
+            return None
         sensor = self.runtime.registry.ultrasonic
         if not sensor:
             return None
         try:
-            if hasattr(sensor, 'read_cm'):
-                distance = sensor.read_cm()
-            else:
-                distance = sensor.measure_distance_cm()
+            distance = sensor.read_cm() if hasattr(sensor, 'read_cm') else sensor.measure_distance_cm()
             if distance is None:
                 return None
             self.runtime.state.patrol_last_error = None
+            self.runtime.state.sensor_status['front_ultrasonic']['last_distance_cm'] = distance
             return round(float(distance), 1)
         except Exception as exc:
             self.runtime.state.patrol_last_error = f'ultrasonic read failed: {exc}'
@@ -191,11 +196,14 @@ class PatrolService:
             self.runtime.state.speed = motors.speed
 
     def _measure_rear_distance(self):
+        if not self._sensor_enabled('rear_ultrasonic'):
+            return None
         sensor = self.runtime.registry.ultrasonic_rear
         if not sensor:
             return None
         try:
             val = sensor.read_cm()
+            self.runtime.state.sensor_status['rear_ultrasonic']['last_distance_cm'] = val
             return val
         except Exception:
             return None
@@ -205,7 +213,7 @@ class PatrolService:
         if not motors:
             return
         self.runtime.state.patrol_drive_state = 'reversing'
-        
+
         rear_dist = self._measure_rear_distance()
         self.runtime.state.patrol_metrics['last_rear_distance_cm'] = rear_dist
         if rear_dist is not None and rear_dist < 15.0:
@@ -215,16 +223,15 @@ class PatrolService:
         motors.backward(self._config.get('reverse_speed', 28))
         self.runtime.state.motor_state = motors.state
         self.runtime.state.speed = motors.speed
-        
-        # Simple step-wise reverse to check sensor (naive non-blocking approach)
+
         total_time = self._config.get('reverse_time_sec', 0.8)
         steps = int(total_time / 0.1) + 1
         for _ in range(steps):
             time.sleep(0.1)
             d = self._measure_rear_distance()
             if d is not None and d < 10.0:
-                 self.logger.info('Rear blocked dynamically, stopping reverse')
-                 break
+                self.logger.info('Rear blocked dynamically, stopping reverse')
+                break
 
         motors.stop()
         self.runtime.state.motor_state = motors.state
@@ -304,20 +311,20 @@ class PatrolService:
                     state.motor_state = motors.state
                     state.speed = motors.speed
                     time.sleep(0.1)
-                    
+
                     now = time.monotonic()
                     if now - self._last_escape_ts < 3.0:
                         self._consecutive_blocks += 1
                     else:
                         self._consecutive_blocks = 1
                     self._last_escape_ts = now
-                    
+
                     if self._consecutive_blocks > self._config.get('memory_max_repeats', 3):
                         self.logger.warning('Consecutive blocks max reached (%d), entered trapped state', self._consecutive_blocks)
                         state.patrol_drive_state = 'trapped'
                         self._stop_motion()
                         continue
-                        
+
                     self._reverse_once()
                     direction = self._choose_turn_direction()
                     self._turn_once(direction)

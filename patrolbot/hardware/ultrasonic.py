@@ -19,6 +19,9 @@ class UltrasonicSensor:
         self.samples = int(ultra_cfg.get('samples', 3))
         self.sample_delay_s = float(ultra_cfg.get('sample_delay_s', 0.02))
         self.offset_cm = float(ultra_cfg.get('offset_cm', 0.0))
+        self.last_distance_cm = None
+        self.last_error = None
+        self.last_good_read_ts = None
 
         self.sensor = DistanceSensor(
             echo=self.echo_pin,
@@ -42,10 +45,50 @@ class UltrasonicSensor:
                 if 0.0 <= distance_cm <= (self.max_distance_m * 100.0 + 5.0):
                     values.append(distance_cm)
             except Exception as exc:
+                self.last_error = str(exc)
                 self.logger.warning('Ultrasonic read failed: %s', exc)
             time.sleep(self.sample_delay_s)
 
         if not values:
             return None
 
-        return round(median(values), 1)
+        value = round(median(values), 1)
+        self.last_distance_cm = value
+        self.last_error = None
+        self.last_good_read_ts = time.time()
+        return value
+
+    def probe(self, reads: int = 3, valid_reads_required: int = 1) -> dict:
+        valid = 0
+        values = []
+        last_error = None
+        for _ in range(max(1, reads)):
+            try:
+                distance = self.read_cm()
+                if distance is not None:
+                    valid += 1
+                    values.append(distance)
+            except Exception as exc:
+                last_error = str(exc)
+            time.sleep(self.sample_delay_s)
+        detected = valid >= max(1, valid_reads_required)
+        return {
+            'initialized': True,
+            'detected': detected,
+            'healthy': detected,
+            'last_distance_cm': round(median(values), 1) if values else None,
+            'last_good_read_ts': self.last_good_read_ts,
+            'last_error': None if detected else (last_error or self.last_error or 'no valid echo'),
+            'details': {
+                'reads': reads,
+                'valid_reads': valid,
+                'trigger_pin': self.trigger_pin,
+                'echo_pin': self.echo_pin,
+            },
+        }
+
+    def close(self) -> None:
+        try:
+            self.sensor.close()
+        except Exception:
+            pass

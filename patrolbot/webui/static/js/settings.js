@@ -138,11 +138,170 @@ async function resetCameraSettings(){
   }
 }
 
+function sensorStatusText(sensor){
+  if(!sensor) return '--';
+  if(sensor.detected && sensor.healthy) return `Detected · ${sensor.enabled ? sensor.use_mode : 'disabled'}`;
+  if(sensor.detected) return 'Detected · unhealthy';
+  return 'Missing / no valid echo';
+}
+
+function sensorDetailText(sensor){
+  if(!sensor) return '';
+  const pinText = (sensor.trigger_pin != null && sensor.echo_pin != null) ? `Trig ${sensor.trigger_pin} / Echo ${sensor.echo_pin}` : '';
+  const distText = sensor.last_distance_cm != null ? ` · ${sensor.last_distance_cm} cm` : '';
+  const errText = sensor.last_error ? ` · ${sensor.last_error}` : '';
+  return `${pinText}${distText}${errText}`.trim();
+}
+
+function applySensorSettings(data){
+  const front = data.front_ultrasonic || data.ultrasonic || {};
+  const rear = data.rear_ultrasonic || data.ultrasonic_rear || {};
+  const fMode = document.getElementById('sensor-front-mode');
+  const rMode = document.getElementById('sensor-rear-mode');
+  if(fMode){ fMode.value = front.use_mode || 'off'; }
+  if(rMode){ rMode.value = rear.use_mode || 'off'; }
+  const fs = document.getElementById('sensor-front-status'); if(fs) fs.textContent = sensorStatusText(front);
+  const rs = document.getElementById('sensor-rear-status'); if(rs) rs.textContent = sensorStatusText(rear);
+  const fd = document.getElementById('sensor-front-detail'); if(fd) fd.textContent = sensorDetailText(front);
+  const rd = document.getElementById('sensor-rear-detail'); if(rd) rd.textContent = sensorDetailText(rear);
+}
+
+async function loadSensorSettings(){
+  const msg = document.getElementById('sensor-settings-message');
+  try{
+    const data = await window.patrolbotApi.getSensorSettings();
+    applySensorSettings(data);
+    if(msg) msg.textContent = 'Sensor status loaded.';
+  }catch(err){
+    if(msg) msg.textContent = 'Failed to load sensor settings.';
+  }
+}
+
+async function saveSensorSettings(){
+  const msg = document.getElementById('sensor-settings-message');
+  try{
+    const payload = {
+      ultrasonic: { enabled: true, use_mode: document.getElementById('sensor-front-mode').value },
+      ultrasonic_rear: { enabled: true, use_mode: document.getElementById('sensor-rear-mode').value },
+    };
+    const data = await window.patrolbotApi.saveSensorSettings(payload);
+    applySensorSettings(data);
+    if(msg) msg.textContent = 'Sensor settings saved.';
+    setActionMessage('Sensor settings saved.', 'success');
+    refreshStatus().catch(()=>{});
+  }catch(err){
+    if(msg) msg.textContent = 'Failed to save sensor settings.';
+    setActionMessage('Failed to save sensor settings.', 'error');
+  }
+}
+
+async function probeSensors(target='all'){
+  const msg = document.getElementById('sensor-settings-message');
+  try{
+    if(msg) msg.textContent = `Probing ${target === 'all' ? 'sensors' : target + ' sensor'}…`;
+    const data = await window.patrolbotApi.probeSensors(target);
+    applySensorSettings(data);
+    if(msg) msg.textContent = 'Sensor probe complete.';
+    refreshStatus().catch(()=>{});
+  }catch(err){
+    if(msg) msg.textContent = 'Sensor probe failed.';
+  }
+}
+
+async function loadSystemSettings(){
+  const msg = document.getElementById('system-settings-message');
+  try{
+    const data = await window.patrolbotApi.getSystemSettings();
+    const toggle = document.getElementById('start-patrol-on-boot');
+    if(toggle) toggle.checked = !!data.start_patrol_on_boot;
+    if(msg) msg.textContent = 'Boot settings loaded.';
+  }catch(err){
+    if(msg) msg.textContent = 'Failed to load boot settings.';
+  }
+}
+
+async function saveSystemSettings(){
+  const msg = document.getElementById('system-settings-message');
+  try{
+    const payload = { start_patrol_on_boot: !!document.getElementById('start-patrol-on-boot').checked };
+    await window.patrolbotApi.saveSystemSettings(payload);
+    if(msg) msg.textContent = 'Boot settings saved.';
+    setActionMessage('Boot settings saved.', 'success');
+  }catch(err){
+    if(msg) msg.textContent = 'Failed to save boot settings.';
+    setActionMessage('Failed to save boot settings.', 'error');
+  }
+}
+
+async function loadWifiStatus(){
+  const msg = document.getElementById('wifi-message');
+  try{
+    const data = await window.patrolbotApi.getNetworkStatus();
+    const connected = !!data.connected;
+    document.getElementById('wifi-connected').textContent = connected ? 'ON' : 'OFF';
+    document.getElementById('wifi-ssid').textContent = data.ssid || '--';
+    document.getElementById('wifi-ip').textContent = data.ip || '--';
+    if(msg) msg.textContent = connected ? `Connected to ${data.ssid || 'Wi‑Fi'}.` : 'Wi‑Fi is currently disconnected.';
+  }catch(err){
+    if(msg) msg.textContent = 'Failed to load Wi‑Fi status.';
+  }
+}
+
+async function scanWifiNetworks(){
+  const msg = document.getElementById('wifi-message');
+  const select = document.getElementById('wifi-network-select');
+  try{
+    if(msg) msg.textContent = 'Scanning for Wi‑Fi networks…';
+    const data = await window.patrolbotApi.scanNetworks();
+    const networks = data.networks || [];
+    select.innerHTML = '';
+    if(!networks.length){
+      select.innerHTML = '<option value="">No networks found</option>';
+    } else {
+      networks.forEach(net => {
+        const opt = document.createElement('option');
+        opt.value = net.ssid;
+        opt.textContent = `${net.ssid} (${net.signal}%) ${net.security || 'open'}`;
+        select.appendChild(opt);
+      });
+    }
+    if(msg) msg.textContent = `Found ${networks.length} network${networks.length === 1 ? '' : 's'}.`;
+  }catch(err){
+    if(msg) msg.textContent = 'Wi‑Fi scan failed.';
+  }
+}
+
+async function connectWifi(){
+  const msg = document.getElementById('wifi-message');
+  try{
+    const ssid = document.getElementById('wifi-network-select').value;
+    const password = document.getElementById('wifi-password').value;
+    if(!ssid){
+      if(msg) msg.textContent = 'Select a network first.';
+      return;
+    }
+    if(msg) msg.textContent = `Connecting to ${ssid}…`;
+    const data = await window.patrolbotApi.connectNetwork({ ssid, password });
+    if(data.ok){
+      if(msg) msg.textContent = data.message || `Connected to ${ssid}.`;
+      loadWifiStatus();
+      refreshStatus().catch(()=>{});
+    }else{
+      if(msg) msg.textContent = data.error || 'Failed to connect.';
+    }
+  }catch(err){
+    if(msg) msg.textContent = 'Failed to connect to Wi‑Fi.';
+  }
+}
 
 document.addEventListener('DOMContentLoaded', ()=>{
   if(document.body.dataset.page!=='settings') return;
   loadServoTrimSettings();
   loadCameraSettings();
+  loadSystemSettings();
+  loadSensorSettings();
+  loadWifiStatus();
+  scanWifiNetworks();
 
   document.querySelectorAll('[data-trim-target]').forEach(btn=>{
     btn.addEventListener('click', ()=> adjustTrimInput(btn.dataset.trimTarget, parseInt(btn.dataset.delta || '0', 10)));
@@ -158,10 +317,25 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   const saveBtn = document.getElementById('save-servo-trims');
   if(saveBtn) saveBtn.addEventListener('click', saveServoTrimSettings);
+  const saveSystemBtn = document.getElementById('save-system-settings');
+  if(saveSystemBtn) saveSystemBtn.addEventListener('click', saveSystemSettings);
+  const saveSensorBtn = document.getElementById('save-sensor-settings');
+  if(saveSensorBtn) saveSensorBtn.addEventListener('click', saveSensorSettings);
+  const probeFrontBtn = document.getElementById('probe-front-sensor');
+  if(probeFrontBtn) probeFrontBtn.addEventListener('click', ()=> probeSensors('front'));
+  const probeRearBtn = document.getElementById('probe-rear-sensor');
+  if(probeRearBtn) probeRearBtn.addEventListener('click', ()=> probeSensors('rear'));
+  const probeAllBtn = document.getElementById('probe-all-sensors');
+  if(probeAllBtn) probeAllBtn.addEventListener('click', ()=> probeSensors('all'));
+  const wifiRefreshBtn = document.getElementById('wifi-refresh');
+  if(wifiRefreshBtn) wifiRefreshBtn.addEventListener('click', loadWifiStatus);
+  const wifiScanBtn = document.getElementById('wifi-scan');
+  if(wifiScanBtn) wifiScanBtn.addEventListener('click', scanWifiNetworks);
+  const wifiConnectBtn = document.getElementById('wifi-connect');
+  if(wifiConnectBtn) wifiConnectBtn.addEventListener('click', connectWifi);
 
   const saveCameraBtn = document.getElementById('save-camera-settings');
   if(saveCameraBtn) saveCameraBtn.addEventListener('click', saveCameraSettings);
-
   const resetCameraBtn = document.getElementById('reset-camera-settings');
   if(resetCameraBtn) resetCameraBtn.addEventListener('click', resetCameraSettings);
 
