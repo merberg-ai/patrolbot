@@ -1,2 +1,0 @@
-from _common import refuse_if_service_running; from patrolbot.config import load_config; from patrolbot.logging_setup import setup_logging; from patrolbot.hardware.motors import MotorController; import time
-refuse_if_service_running(); config=load_config(); logger=setup_logging(config); m=MotorController(config, logger); m.forward(35); time.sleep(1); m.stop(); time.sleep(.5); m.backward(35); time.sleep(1); m.stop()
