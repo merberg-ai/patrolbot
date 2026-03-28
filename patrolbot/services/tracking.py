@@ -121,6 +121,7 @@ class TrackingService:
         self._mjpeg_clients_lock = threading.Lock()
         self._cv_ok = self._check_cv()
         self._sync_state_basics()
+        self._apply_startup_safety()
 
     def _check_cv(self) -> bool:
         try:
@@ -211,6 +212,22 @@ class TrackingService:
         state.tracking_yolo_available = self.yolo_available()
         state.tracking_detector_details = self.get_detector_details()
 
+    def _apply_startup_safety(self):
+        requested = bool(self._config.get('enabled', False))
+        if not requested:
+            return
+        if not self._cv_ok:
+            self._config['enabled'] = False
+            self.runtime.state.tracking_enabled = False
+            self.runtime.state.tracking_disable_reason = 'opencv_unavailable'
+            self.logger.warning('Tracking requested at boot but OpenCV is unavailable; starting disabled')
+            return
+        if self._detector is None or not self._detector.is_available():
+            self._config['enabled'] = False
+            self.runtime.state.tracking_enabled = False
+            self.runtime.state.tracking_disable_reason = 'detector_unavailable'
+            self.logger.warning('Tracking requested at boot but detector %s is unavailable; starting disabled', self._config.get('detector', 'unknown'))
+
     def get_config(self):
         return dict(self._config)
 
@@ -234,14 +251,17 @@ class TrackingService:
             'selected': name,
             'available': available,
             'status': status,
+            'opencv_available': self._cv_ok,
+            'tracking_enabled_requested': bool(self._config.get('enabled', False)),
+            'tracking_enabled_live': bool(self.runtime.state.tracking_enabled),
             'yolo_available': self.yolo_available(),
             'enable_yolo': bool(self._config.get('enable_yolo', False)),
             'yolo_model': self._config.get('yolo_model', 'yolov8n.pt'),
             'yolo_classes': list(self._config.get('yolo_classes', []) or []),
             'detectors': {
-                'face': {'available': True, 'status': 'ready'},
-                'body': {'available': True, 'status': 'ready'},
-                'motion': {'available': True, 'status': 'ready'},
+                'face': {'available': self._cv_ok, 'status': 'ready' if self._cv_ok else 'unavailable: opencv missing'},
+                'body': {'available': self._cv_ok, 'status': 'ready' if self._cv_ok else 'unavailable: opencv missing'},
+                'motion': {'available': self._cv_ok, 'status': 'ready' if self._cv_ok else 'unavailable: opencv missing'},
                 'yolo': {
                     'available': self.yolo_available() and bool(self._config.get('enable_yolo', False)),
                     'status': status if name == 'yolo' else ('available' if self.yolo_available() else 'unavailable: ultralytics import failed'),
@@ -266,12 +286,22 @@ class TrackingService:
         self._tracker.apply_config(self._config)
         self.runtime.config['tracking'] = dict(self._config)
         self._detector = build_detector(self._config.get('detector', 'face'), self._config)
+        warnings = []
+        if self._config.get('detector') == 'yolo' and not bool(self._config.get('enable_yolo', False)):
+            warnings.append('YOLO detector selected but Enable YOLO is off; tracking cannot use YOLO until enabled.')
+        if self._config.get('detector') == 'yolo' and not self.yolo_available():
+            warnings.append('Ultralytics/YOLO is unavailable in this environment.')
+        if not self._cv_ok:
+            warnings.append('OpenCV is unavailable; tracking cannot be enabled until it is installed.')
         self._sync_state_basics()
+        if self.runtime.state.tracking_enabled and (self._detector is None or not self._detector.is_available()):
+            self.disable(reason='detector_unavailable')
+            warnings.append('Tracking was disabled because the selected detector is unavailable.')
         if persist:
             runtime_cfg = load_runtime_config()
             runtime_cfg['tracking'] = dict(self._config)
             save_runtime_config(runtime_cfg)
-        return dict(self._config), []
+        return dict(self._config), warnings
 
     def set_enabled(self, enabled: bool, persist: bool = False):
         self._config['enabled'] = bool(enabled)
@@ -279,6 +309,8 @@ class TrackingService:
         self.runtime.state.tracking_enabled = bool(enabled)
         self.runtime.state.tracking_scan_active = False
         self.runtime.state.tracking_disable_reason = None if enabled else self.runtime.state.tracking_disable_reason
+        self.runtime.state.tracking_detector_status = self.get_detector_status()
+        self.runtime.state.tracking_detector_details = self.get_detector_details()
         if persist:
             runtime_cfg = load_runtime_config()
             runtime_cfg['tracking'] = dict(self._config)
@@ -457,7 +489,10 @@ class TrackingService:
         self._last_move_ts = time.time()
 
     def _read_ultrasonic(self) -> float | None:
-        """Return distance in cm from the ultrasonic sensor, or None."""
+        """Return distance in cm from the front ultrasonic sensor, or None."""
+        entry = self.runtime.state.sensor_status.get('front_ultrasonic', {})
+        if not entry.get('enabled') or entry.get('use_mode') == 'off':
+            return None
         sensor = getattr(self.runtime.registry, 'ultrasonic', None)
         if sensor is None:
             return None
@@ -808,9 +843,10 @@ class TrackingService:
             frame_counter += 1
             every_n = max(1, int(cfg.get('process_every_n_frames', 3)))
             process_this = (frame_counter % every_n == 0)
-            detections = self._latest_detections
-            target = self._latest_target
-            if process_this:
+            tracking_active = bool(self.runtime.state.tracking_enabled) and self.runtime.state.tracking_mode != 'off'
+            detections = self._latest_detections if tracking_active else []
+            target = self._latest_target if tracking_active else None
+            if process_this and tracking_active:
                 try:
                     suppress_motion = (
                         cfg.get('detector') == 'motion' and
@@ -850,6 +886,17 @@ class TrackingService:
                     detections = []
                     target = None
                     self.logger.exception('Detector failure: %s', exc)
+            elif not tracking_active:
+                self._latest_detections = []
+                self._latest_target = None
+                self.runtime.state.tracking_last_detection_count = 0
+                self.runtime.state.tracking_target_acquired = False
+                self.runtime.state.tracking_box = None
+                self.runtime.state.tracking_target_label = None
+                self.runtime.state.tracking_target_confidence = None
+                self.runtime.state.tracking_detector_available = bool(self._detector.is_available()) if self._detector else False
+                self.runtime.state.tracking_detector_status = self.get_detector_status()
+                self.runtime.state.tracking_detector_details = self.get_detector_details()
 
             if motors and (getattr(motors, 'motion_locked', False) or getattr(motors, 'estop_latched', False)):
                 if self.runtime.state.tracking_enabled:

@@ -16,6 +16,7 @@ from patrolbot.services.network_status import NetworkStatusService
 from patrolbot.services.snapshots import SnapshotService
 from patrolbot.services.status_leds import StatusLedService
 from patrolbot.services.telemetry import TelemetryService
+from patrolbot.services.tracking import TrackingService
 from patrolbot.state import RuntimeState
 
 
@@ -151,6 +152,16 @@ class StartupManager:
 
             registry.camera = CameraWrapper(self.config, self.logger)
             registry.camera.start()
+
+            try:
+                runtime.tracking = TrackingService(runtime, self.logger)
+                runtime.tracking.start()
+            except Exception as exc:
+                runtime.tracking = None
+                state.tracking_last_error = str(exc)
+                state.tracking_detector_status = f'error: {exc}'
+                state.tracking_disable_reason = 'startup_failed'
+                self.logger.exception('Tracking service failed to initialize: %s', exc)
 
             from patrolbot.services.patrol import PatrolService
             runtime.patrol = PatrolService(runtime, self.logger)

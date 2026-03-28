@@ -1,5 +1,5 @@
 from __future__ import annotations
-from flask import Flask, Response, current_app
+from flask import Flask, Response, current_app, request
 
 
 def register_status_routes(app: Flask) -> None:
@@ -23,5 +23,9 @@ def register_status_routes(app: Flask) -> None:
         cam = runtime.registry.camera
         if not cam or not cam.running:
             return Response('camera unavailable', status=503, mimetype='text/plain')
-        gen = cam.mjpeg_generator(runtime=runtime)
+        view = str(request.args.get('view', '') or '').strip().lower()
+        if view == 'tracking' and getattr(runtime, 'tracking', None):
+            gen = runtime.tracking.mjpeg()
+        else:
+            gen = cam.mjpeg_generator(runtime=runtime)
         return Response(gen, mimetype='multipart/x-mixed-replace; boundary=frame')

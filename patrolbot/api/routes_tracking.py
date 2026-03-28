@@ -108,6 +108,9 @@ def _state_payload(runtime):
         'mode': state.tracking_mode,
         'follow_distance_cm': state.tracking_follow_distance_cm,
         'follow_state': state.tracking_follow_state,
+        'disable_reason': state.tracking_disable_reason,
+        'overlay_enabled': state.tracking_overlay_enabled,
+        'stream_url': '/video_feed?view=tracking',
     }
 
 
@@ -188,7 +191,7 @@ def register_tracking_routes(app: Flask) -> None:
     def tracking_toggle():
         runtime = current_app.config['PATROLBOT_RUNTIME']
         if not runtime.tracking:
-            return {'ok': False, 'error': 'tracking service unavailable in phase 1'}, 503
+            return {'ok': False, 'error': 'tracking service unavailable'}, 503
         runtime.tracking.toggle()
         return {'ok': True, 'enabled': runtime.state.tracking_enabled}
 
@@ -196,7 +199,7 @@ def register_tracking_routes(app: Flask) -> None:
     def tracking_enable():
         runtime = current_app.config['PATROLBOT_RUNTIME']
         if not runtime.tracking:
-            return {'ok': False, 'error': 'tracking service unavailable in phase 1'}, 503
+            return {'ok': False, 'error': 'tracking service unavailable'}, 503
         runtime.tracking.enable()
         return {'ok': True, 'enabled': runtime.state.tracking_enabled}
 
@@ -204,7 +207,7 @@ def register_tracking_routes(app: Flask) -> None:
     def tracking_disable():
         runtime = current_app.config['PATROLBOT_RUNTIME']
         if not runtime.tracking:
-            return {'ok': False, 'error': 'tracking service unavailable in phase 1'}, 503
+            return {'ok': False, 'error': 'tracking service unavailable'}, 503
         runtime.tracking.disable()
         return {'ok': True, 'enabled': runtime.state.tracking_enabled}
 

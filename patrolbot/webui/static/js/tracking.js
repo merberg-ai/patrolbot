@@ -3,6 +3,15 @@ const $t = (id) => document.getElementById(id);
 let trackingCurrentState = null;
 let trackingCurrentConfig = null;
 let trackingLastRefresh = 0;
+let trackingStreamNonce = 0;
+
+function trackingRefreshStream() {
+  const img = $t('tracking-camera-preview');
+  if (!img) return;
+  const base = '/video_feed?view=tracking';
+  trackingStreamNonce += 1;
+  img.src = `${base}&_=${trackingStreamNonce}`;
+}
 
 function trackingConsoleEl() { return $t('console'); }
 
@@ -214,6 +223,8 @@ async function trackingApplyServo() {
 async function trackingBoot() {
   const cfg = await trackingFetch('/api/tracking/config');
   trackingFillConfig(cfg);
+  if (Array.isArray(cfg.warnings) && cfg.warnings.length) cfg.warnings.forEach(w => trackingLog(`warning: ${w}`));
+  trackingRefreshStream();
   await trackingRefresh();
   setInterval(() => trackingRefresh().catch(err => trackingLog(`refresh failed: ${err.message || err}`)), 800);
 }
@@ -266,13 +277,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   $t('toggle-tracking').addEventListener('click', async () => {
     try {
-      if (trackingCurrentState?.tracking_enabled) {
-        await trackingFetch('/api/tracking/disable', {method:'POST'});
-        trackingLog('tracking disabled');
-      } else {
-        await trackingFetch('/api/tracking/enable', {method:'POST'});
-        trackingLog('tracking enabled');
-      }
+      const wasEnabled = !!trackingCurrentState?.tracking_enabled;
+      await trackingFetch(wasEnabled ? '/api/tracking/disable' : '/api/tracking/enable', {method:'POST'});
+      trackingLog(wasEnabled ? 'tracking disabled' : 'tracking enabled');
+      trackingRefreshStream();
       trackingRefresh();
     } catch (err) { trackingLog(`toggle failed: ${err.message || err}`); }
   });
@@ -280,9 +288,11 @@ document.addEventListener('DOMContentLoaded', () => {
   $t('save-config').addEventListener('click', async () => {
     try {
       const payload = {tracking: trackingReadConfigForm()};
-      await trackingFetch('/api/tracking/config', {method:'POST', body: JSON.stringify(payload)});
+      const res = await trackingFetch('/api/tracking/config', {method:'POST', body: JSON.stringify(payload)});
       trackingLog(`config saved: detector=${payload.tracking.detector} mode=${payload.tracking.mode}`);
+      if (Array.isArray(res.warnings) && res.warnings.length) res.warnings.forEach(w => trackingLog(`warning: ${w}`));
       if (window.setActionMessage) setActionMessage('Tracking config saved.', 'success');
+      trackingRefreshStream();
       trackingRefresh();
     } catch (err) {
       trackingLog(`save failed: ${err.message || err}`);
@@ -294,6 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await trackingFetch('/api/tracking/servo/home', {method:'POST'});
       trackingLog(`servo homed pan=${res.servo.pan.angle} tilt=${res.servo.tilt.angle}`);
+      trackingRefreshStream();
       trackingRefresh();
     } catch (err) { trackingLog(`home failed: ${err.message || err}`); }
   });
@@ -317,6 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const res = await trackingFetch('/api/tracking/servo/nudge', {method:'POST', body: JSON.stringify({direction: btn.dataset.nudge})});
       trackingLog(`servo nudged ${btn.dataset.nudge} -> pan=${res.servo.pan.angle} tilt=${res.servo.tilt.angle}`);
+      trackingRefreshStream();
       trackingRefresh();
     } catch (err) { trackingLog(`nudge failed: ${err.message || err}`); }
   }));

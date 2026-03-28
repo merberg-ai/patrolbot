@@ -16,6 +16,10 @@ def safe_shutdown(runtime, logger) -> None:
     try:
         if getattr(runtime, 'telemetry', None):
             runtime.telemetry.stop()
+        if getattr(runtime, 'tracking', None):
+            runtime.tracking.stop()
+        if getattr(runtime, 'patrol', None):
+            runtime.patrol.stop()
         if getattr(runtime, 'status_leds', None):
             runtime.status_leds.close()
         if reg.motors:
@@ -32,7 +36,7 @@ def safe_shutdown(runtime, logger) -> None:
         if getattr(runtime, 'gamepad', None):
             runtime.gamepad.stop()
     finally:
-        for obj_name in ['lights', 'hat']:
+        for obj_name in ['ultrasonic', 'ultrasonic_rear', 'lights', 'hat']:
             obj = getattr(reg, obj_name, None)
             close = getattr(obj, 'close', None)
             if callable(close):

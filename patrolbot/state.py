@@ -75,6 +75,7 @@ class RuntimeState:
     tracking_preferred_target: str = 'largest'
     tracking_scan_active: bool = False
     tracking_metrics: dict[str, Any] = field(default_factory=dict)
+    tracking_fps_actual: float = 0.0
     tracking_mjpeg_clients: int = 0
     tracking_follow_distance_cm: float | None = None
     tracking_follow_state: str = 'stopped'
