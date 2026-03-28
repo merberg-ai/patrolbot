@@ -75,6 +75,22 @@ class StartupManager:
             })
             return None
 
+    def _should_probe_on_startup(self, cfg_key: str) -> bool:
+        cfg = self.config.get(cfg_key, {}) or {}
+        enabled = bool(cfg.get('enabled', cfg_key == 'ultrasonic'))
+        probe_on_startup = bool(cfg.get('probe_on_startup', enabled if cfg_key == 'ultrasonic' else False))
+        return enabled or probe_on_startup
+
+    def _mark_sensor_unprobed(self, runtime, cfg_key: str, slot: str) -> None:
+        self._sync_sensor_state(runtime, slot, cfg_key, None, {
+            'initialized': False,
+            'detected': False,
+            'healthy': False,
+            'available': False,
+            'last_error': None,
+            'details': {'status': 'not_probed_on_startup'},
+        })
+
     def initialize(self) -> RuntimeContext:
         registry = HardwareRegistry()
         state = RuntimeState()
@@ -117,8 +133,17 @@ class StartupManager:
             registry.switches = SwitchController(self.config, self.logger)
             registry.switches.all_off()
 
-            registry.ultrasonic = self._probe_sensor(runtime, 'ultrasonic', 'front_ultrasonic')
-            registry.ultrasonic_rear = self._probe_sensor(runtime, 'ultrasonic_rear', 'rear_ultrasonic')
+            if self._should_probe_on_startup('ultrasonic'):
+                registry.ultrasonic = self._probe_sensor(runtime, 'ultrasonic', 'front_ultrasonic')
+            else:
+                registry.ultrasonic = None
+                self._mark_sensor_unprobed(runtime, 'ultrasonic', 'front_ultrasonic')
+
+            if self._should_probe_on_startup('ultrasonic_rear'):
+                registry.ultrasonic_rear = self._probe_sensor(runtime, 'ultrasonic_rear', 'rear_ultrasonic')
+            else:
+                registry.ultrasonic_rear = None
+                self._mark_sensor_unprobed(runtime, 'ultrasonic_rear', 'rear_ultrasonic')
             registry.battery = BatteryMonitor(self.config, self.logger)
 
             runtime.snapshots = SnapshotService(self.config, self.logger)

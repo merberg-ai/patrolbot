@@ -61,6 +61,7 @@ servo:
     invert: true
 ultrasonic:
   enabled: true
+  probe_on_startup: true
   use_mode: safety_only
   trigger_pin: 23
   echo_pin: 24
@@ -70,6 +71,7 @@ ultrasonic:
   offset_cm: 0.0
 ultrasonic_rear:
   enabled: false
+  probe_on_startup: false
   use_mode: safety_only
   trigger_pin: 17
   echo_pin: 27

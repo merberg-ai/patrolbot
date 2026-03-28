@@ -142,6 +142,7 @@ function sensorStatusText(sensor){
   if(!sensor) return '--';
   if(sensor.detected && sensor.healthy) return `Detected · ${sensor.enabled ? sensor.use_mode : 'disabled'}`;
   if(sensor.detected) return 'Detected · unhealthy';
+  if(sensor.details && sensor.details.status === 'not_probed_on_startup') return 'Not probed yet';
   return 'Missing / no valid echo';
 }
 
@@ -181,8 +182,8 @@ async function saveSensorSettings(){
   const msg = document.getElementById('sensor-settings-message');
   try{
     const payload = {
-      ultrasonic: { enabled: true, use_mode: document.getElementById('sensor-front-mode').value },
-      ultrasonic_rear: { enabled: true, use_mode: document.getElementById('sensor-rear-mode').value },
+      ultrasonic: { use_mode: document.getElementById('sensor-front-mode').value },
+      ultrasonic_rear: { use_mode: document.getElementById('sensor-rear-mode').value },
     };
     const data = await window.patrolbotApi.saveSensorSettings(payload);
     applySensorSettings(data);

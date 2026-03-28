@@ -93,6 +93,7 @@ def _sensor_payload(runtime, config_key: str) -> dict:
     entry['trigger_pin'] = cfg.get('trigger_pin')
     entry['echo_pin'] = cfg.get('echo_pin')
     entry['configured'] = bool(cfg.get('enabled', config_key == 'ultrasonic'))
+    entry['probe_on_startup'] = bool(cfg.get('probe_on_startup', entry['configured'] if config_key == 'ultrasonic' else False))
     entry['use_mode'] = str(cfg.get('use_mode', entry.get('use_mode', 'off')))
     entry['enabled'] = bool(entry.get('configured') and entry.get('use_mode') != 'off' and entry.get('detected'))
     return entry
@@ -238,10 +239,12 @@ def register_settings_routes(app: Flask) -> None:
             if use_mode != 'off' and not entry.get('detected'):
                 return {'ok': False, 'error': f'{config_key} is not detected. Probe it before enabling.'}, 400
             cfg['use_mode'] = use_mode
-            cfg['enabled'] = bool(cfg.get('enabled', config_key == 'ultrasonic'))
+            cfg['enabled'] = bool(use_mode != 'off')
+            cfg['probe_on_startup'] = bool(cfg.get('probe_on_startup', cfg['enabled'] if config_key == 'ultrasonic' else False))
             runtime.config[config_key] = cfg
             runtime_cfg[config_key] = dict(cfg)
             entry['configured'] = bool(cfg.get('enabled', False))
+            entry['probe_on_startup'] = bool(cfg.get('probe_on_startup', entry['configured'] if config_key == 'ultrasonic' else False))
             entry['use_mode'] = use_mode
             entry['enabled'] = bool(entry['configured'] and use_mode != 'off' and entry.get('detected'))
             updated[config_key] = _sensor_payload(runtime, config_key)
