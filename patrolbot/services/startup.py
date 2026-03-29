@@ -16,7 +16,7 @@ from patrolbot.services.network_status import NetworkStatusService
 from patrolbot.services.snapshots import SnapshotService
 from patrolbot.services.status_leds import StatusLedService
 from patrolbot.services.telemetry import TelemetryService
-from patrolbot.services.tracking import TrackingService
+from patrolbot.services.vision import VisionService
 from patrolbot.state import RuntimeState
 
 
@@ -103,7 +103,7 @@ class StartupManager:
             telemetry=None,
             status_leds=None,
             gamepad=None,
-            tracking=None,
+            vision=None,
             patrol=None,
             network_status=None,
             snapshots=None,
@@ -154,14 +154,14 @@ class StartupManager:
             registry.camera.start()
 
             try:
-                runtime.tracking = TrackingService(runtime, self.logger)
-                runtime.tracking.start()
+                runtime.vision = VisionService(runtime, self.logger)
+                runtime.vision.start()
             except Exception as exc:
-                runtime.tracking = None
-                state.tracking_last_error = str(exc)
-                state.tracking_detector_status = f'error: {exc}'
-                state.tracking_disable_reason = 'startup_failed'
-                self.logger.exception('Tracking service failed to initialize: %s', exc)
+                runtime.vision = None
+                state.vision_last_error = str(exc)
+                state.vision_detector_status = f'error: {exc}'
+                state.vision_disable_reason = 'startup_failed'
+                self.logger.exception('Vision service failed to initialize: %s', exc)
 
             from patrolbot.services.patrol import PatrolService
             runtime.patrol = PatrolService(runtime, self.logger)

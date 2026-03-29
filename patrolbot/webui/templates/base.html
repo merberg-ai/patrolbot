@@ -61,7 +61,7 @@
 
   <nav class='bottom-nav'>
     <a href='/patrol' class='nav-item {% if page=="patrol" %}active{% endif %}'><span class='nav-icon'>🤖</span>Patrol</a>
-    <a href='/tracking' class='nav-item {% if page=="tracking" %}active{% endif %}'><span class='nav-icon'>🎯</span>Tracking</a>
+
     <a href='/settings' class='nav-item {% if page=="settings" %}active{% endif %}'><span class='nav-icon'>⚙️</span>Settings</a>
     <a href='/system' class='nav-item {% if page=="system" %}active{% endif %}'><span class='nav-icon'>🖥</span>System</a>
   </nav>
@@ -71,7 +71,7 @@
   <script src='{{ url_for("static", filename="js/settings.js") }}'></script>
   <script src='{{ url_for("static", filename="js/patrol.js") }}'></script>
   <script src='{{ url_for("static", filename="js/system.js") }}'></script>
-  <script src='{{ url_for("static", filename="js/tracking.js") }}'></script>
+
 
   <script>
     (function() {

@@ -11,9 +11,6 @@ def register_webui_routes(app: Flask) -> None:
     def patrol():
         return render_template('patrol.html', page='patrol')
 
-    @app.get('/tracking')
-    def tracking():
-        return render_template('tracking.html', page='tracking')
 
     @app.get('/settings')
     def settings():

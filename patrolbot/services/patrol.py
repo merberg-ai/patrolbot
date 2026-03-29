@@ -23,6 +23,21 @@ class PatrolService:
         'scan_tilt_angle': 90,
         'memory_max_repeats': 3,
         'trapped_timeout_s': 10.0,
+        
+        # New Targeting Features
+        'action_on_detect': 'follow',  # 'follow', 'log', 'ignore'
+        'target_classes': ['person', 'dog', 'cat'],
+        'save_screenshots': True,
+        
+        # Follow Mode PID Configuration
+        'follow_target_distance_cm': 60,
+        'follow_stop_distance_cm': 25,
+        'follow_drive_speed': 30,
+        'follow_steer_gain': 0.6,
+        'follow_steer_smoothing_alpha': 0.45,
+        'follow_pan_gain': 0.08,
+        'follow_use_ultrasonic': True,
+        'follow_image_size_ratio_target': 0.25,
     }
 
     def __init__(self, runtime, logger):
@@ -38,6 +53,9 @@ class PatrolService:
         self._last_scan_ts = 0.0
         self._consecutive_blocks = 0
         self._last_escape_ts = time.monotonic()
+        self._last_log_ts = 0.0
+        self._last_steer_angle = None
+        self._follow_distance_ema = None
         self._sync_state_basics()
 
     def _normalize(self, source: dict) -> dict:
@@ -59,6 +77,26 @@ class PatrolService:
         cfg['scan_tilt_angle'] = int(cfg.get('scan_tilt_angle', 90))
         cfg['memory_max_repeats'] = max(1, int(cfg.get('memory_max_repeats', 3)))
         cfg['trapped_timeout_s'] = max(1.0, float(cfg.get('trapped_timeout_s', 10.0)))
+        
+        cfg['action_on_detect'] = str(cfg.get('action_on_detect', 'follow')).lower()
+        if cfg['action_on_detect'] not in {'follow', 'log', 'ignore'}:
+            cfg['action_on_detect'] = 'follow'
+            
+        raw_classes = cfg.get('target_classes', [])
+        if isinstance(raw_classes, str):
+            cfg['target_classes'] = [x.strip().lower() for x in raw_classes.split(',') if x.strip()]
+        else:
+            cfg['target_classes'] = [str(x).lower() for x in raw_classes]
+            
+        cfg['save_screenshots'] = bool(cfg.get('save_screenshots', True))
+        cfg['follow_target_distance_cm'] = max(10, int(cfg.get('follow_target_distance_cm', 60)))
+        cfg['follow_stop_distance_cm'] = max(5, int(cfg.get('follow_stop_distance_cm', 25)))
+        cfg['follow_drive_speed'] = max(0, min(100, int(cfg.get('follow_drive_speed', 30))))
+        cfg['follow_steer_gain'] = max(0.0, min(5.0, float(cfg.get('follow_steer_gain', 0.6))))
+        cfg['follow_steer_smoothing_alpha'] = max(0.0, min(1.0, float(cfg.get('follow_steer_smoothing_alpha', 0.45))))
+        cfg['follow_pan_gain'] = max(0.0, min(2.0, float(cfg.get('follow_pan_gain', 0.08))))
+        cfg['follow_use_ultrasonic'] = bool(cfg.get('follow_use_ultrasonic', True))
+        cfg['follow_image_size_ratio_target'] = max(0.01, min(1.0, float(cfg.get('follow_image_size_ratio_target', 0.25))))
         return cfg
 
     def _sync_state_basics(self):
@@ -66,7 +104,7 @@ class PatrolService:
         state.patrol_enabled = bool(self._config.get('enabled', False))
         state.patrol_speed = self._config.get('speed', 35)
         state.patrol_mode = 'patrol'
-        state.patrol_targets = []
+        state.patrol_targets = self._config.get('target_classes', [])
         metrics = state.patrol_metrics if isinstance(state.patrol_metrics, dict) else {}
         metrics.setdefault('last_distance_cm', None)
         metrics.setdefault('last_rear_distance_cm', None)
@@ -84,6 +122,15 @@ class PatrolService:
         self._config = self._normalize(merged)
         self.runtime.config['patrol'] = dict(self._config)
         self._sync_state_basics()
+
+        # If Patrol wants YOLO, make sure VisionService is configured for it
+        if self._config.get('enabled'):
+            vision_cfg = self.runtime.vision.get_config() if getattr(self.runtime, 'vision', None) else {}
+            if not vision_cfg.get('enable_yolo') or not vision_cfg.get('enabled'):
+                if getattr(self.runtime, 'vision', None):
+                    self.runtime.vision.update_config({'enabled': True, 'enable_yolo': True})
+                    self.logger.info("Patrol mode automatically enabled Vision Service with YOLO.")
+
         if persist:
             runtime_cfg = load_runtime_config()
             runtime_cfg['patrol'] = dict(self._config)
@@ -99,11 +146,11 @@ class PatrolService:
         self.logger.info('Patrol enabled')
         
         # Turn off tracking to avoid conflicting UI states, but our modified
-        # TrackingService engine will still passively provide YOLO detections.
-        if getattr(self.runtime.state, 'tracking_enabled', False):
-            tracking = getattr(self.runtime, 'tracking', None)
-            if tracking:
-                tracking.disable(reason='patrol_override')
+        # VisionService engine will still passively provide YOLO detections.
+        if getattr(self.runtime.state, 'vision_enabled', False) is False:
+            vision = getattr(self.runtime, 'vision', None)
+            if vision:
+                vision.enable()
 
     def disable(self, reason: str = 'user'):
         self._config['enabled'] = False
@@ -198,8 +245,7 @@ class PatrolService:
             self.runtime.state.patrol_drive_state = f'turning_{direction}'
             time.sleep(self._config.get('turn_time_sec', 0.9))
         finally:
-            steering.center()
-            self.runtime.state.steering_angle = steering.angle
+             # Do not center immediately to keep turning inertia
             motors.stop()
             self.runtime.state.motor_state = motors.state
             self.runtime.state.speed = motors.speed
@@ -218,20 +264,23 @@ class PatrolService:
             return None
 
     def _get_yolo_obstacle(self) -> dict | None:
-        tracking = getattr(self.runtime, 'tracking', None)
-        if not tracking:
+        if not self.runtime.state.vision_enabled:
             return None
-        detections = getattr(tracking, '_latest_detections', [])
+        detections = getattr(self.runtime.state, 'vision_detections', [])
         if not detections:
             return None
 
-        frame_size = self.runtime.state.tracking_frame_size or (640, 480)
+        frame_size = self.runtime.state.vision_frame_size or (640, 480)
         frame_area = max(1, frame_size[0] * frame_size[1])
         frame_w = max(1, frame_size[0])
 
         obstacles = []
+        target_classes = self._config.get('target_classes', [])
         for det in detections:
-            area_ratio = getattr(det, 'area', 0) / frame_area
+            if getattr(det, 'label', '') in target_classes:
+                continue # Target objects are NOT obstacles
+            
+            area_ratio = getattr(det, 'area', getattr(det, 'w', 0) * getattr(det, 'h', 0)) / frame_area
             center_x = getattr(det, 'center_x', frame_w / 2.0)
             center_ratio = center_x / frame_w
 
@@ -249,6 +298,7 @@ class PatrolService:
                     'area_ratio': area_ratio,
                     'is_right': is_right,
                     'is_left': is_left,
+                    'label': getattr(det, 'label', 'unknown')
                 })
 
         if not obstacles:
@@ -315,6 +365,207 @@ class PatrolService:
 
         self.runtime.state.pan_angle = servo.pan_angle
         self.runtime.state.tilt_angle = servo.tilt_angle
+        
+    def _ema(self, previous, current, alpha: float):
+        if current is None:
+            return previous
+        if previous is None:
+            return float(current)
+        alpha = max(0.0, min(1.0, float(alpha)))
+        return (alpha * float(current)) + ((1.0 - alpha) * float(previous))
+        
+    def _log_target(self, target):
+        self.runtime.state.patrol_drive_state = 'investigating'
+        self.runtime.state.patrol_last_detected = target.label
+        self.runtime.state.patrol_detect_count += 1
+        
+        now = time.time()
+        if (now - self._last_log_ts) < 5.0: # Backoff
+            return
+        self._last_log_ts = now
+        
+        self.logger.info("Target Detected: %s (Conf: %.2f)", target.label, getattr(target, 'confidence', 1.0))
+        self._stop_motion()
+        
+        if self._config.get('save_screenshots'):
+            snapshots = getattr(self.runtime, 'snapshots', None)
+            if snapshots:
+                try:
+                    snapshots.take_snapshot(reason=f"Target {target.label} detected")
+                except Exception as e:
+                    self.logger.error("Failed to save snapshot: %s", e)
+                    
+        time.sleep(2.0) # Pause to look at it, then resume patrol
+
+    def _follow_target(self, target, distance):
+        cfg = self._config
+        servo = self.runtime.registry.camera_servo
+        motors = self.runtime.registry.motors
+        steering = self.runtime.registry.steering
+        
+        if not target:
+            return
+
+        self.runtime.state.patrol_drive_state = 'following'
+        self.runtime.state.patrol_last_detected = target.label
+        
+        frame_size = self.runtime.state.vision_frame_size or (640, 480)
+        frame_w, frame_h = frame_size
+
+        # 1. Steer the Camera to keep the object centered (Pan only to preserve tilt)
+        if servo:
+            pan_error = target.center_x - (frame_w / 2.0)
+            pan = servo.pan_angle
+            pan_gain = float(cfg.get('follow_pan_gain', 0.08))
+            pan -= int(round(pan_error * pan_gain))
+            pan = max(getattr(servo, 'pan_min', 40), min(getattr(servo, 'pan_max', 140), pan))
+            servo.set_pan(pan)
+            self.runtime.state.pan_angle = pan
+
+        # 2. Steer Wheels
+        if steering:
+             center = getattr(steering, 'center_angle', 90)
+             min_a = getattr(steering, 'min_angle', 45)
+             max_a = getattr(steering, 'max_angle', 135)
+             steer_gain = float(cfg.get('follow_steer_gain', 0.6))
+             steer_alpha = float(cfg.get('follow_steer_smoothing_alpha', 0.45))
+             
+             err_x = float(target.center_x - (frame_w / 2.0))
+             norm_err = err_x / max(1.0, frame_w / 2.0)
+             steer_range = float((max_a - center) if norm_err >= 0 else (center - min_a))
+             target_angle = float(center + (norm_err * steer_range * steer_gain))
+             target_angle = max(float(min_a), min(float(max_a), target_angle))
+             
+             if self._last_steer_angle is None:
+                 self._last_steer_angle = float(center)
+             current_angle = float(self._last_steer_angle)
+             smoothed = (steer_alpha * target_angle) + ((1.0 - steer_alpha) * current_angle)
+             self._last_steer_angle = smoothed
+             
+             steering.set_angle(int(round(smoothed)))
+             self.runtime.state.steering_angle = steering.angle
+
+        # 3. Drive Forward/Reverse depending on distance / area volume
+        if motors:
+            speed = int(cfg.get('follow_drive_speed', 30))
+            stop_dist = float(cfg.get('follow_stop_distance_cm', 25))
+            target_dist = float(cfg.get('follow_target_distance_cm', 60))
+            use_sonic = bool(cfg.get('follow_use_ultrasonic', True))
+            
+            # Decide to move forward, backward, or stop
+            drive_state = 'stopped'
+            
+            if use_sonic and distance is not None:
+                if distance > (target_dist + 15):
+                    drive_state = 'forward'
+                elif distance < stop_dist:
+                    drive_state = 'backward'
+                # Else stop
+            else:
+                 area_ratio = getattr(target, 'area', getattr(target, 'w', 0) * getattr(target, 'h', 0)) / max(1, frame_w * frame_h)
+                 area_target = float(cfg.get('follow_image_size_ratio_target', 0.25))
+                 if area_ratio < (area_target - 0.05):
+                     drive_state = 'forward'
+                 elif area_ratio > (area_target + 0.15): # Overly close
+                     drive_state = 'backward'
+
+            if drive_state == 'forward':
+                motors.forward(speed)
+            elif drive_state == 'backward':
+                motors.backward(speed - 5)
+            else:
+                motors.stop()
+                
+            self.runtime.state.motor_state = motors.state
+            self.runtime.state.speed = motors.speed
+            time.sleep(0.05)
+
+
+    def _patrol_drive(self, distance):
+         state = self.runtime.state
+         motors = self.runtime.registry.motors
+         steering = self.runtime.registry.steering
+         
+         yolo_obs = self._get_yolo_obstacle()
+         
+         hard_obstacle = False
+         soft_obstacle_dir = None
+         avoid_dist = self._config.get('avoidance_distance_cm', 30)
+
+         if distance is not None:
+             if distance < avoid_dist:
+                 hard_obstacle = True
+             elif distance < avoid_dist * 1.8:
+                 soft_obstacle_dir = self._last_turn
+
+         if yolo_obs:
+             if yolo_obs['area_ratio'] > 0.25:
+                 hard_obstacle = True
+                 if not soft_obstacle_dir:
+                     soft_obstacle_dir = 'left' if yolo_obs['is_right'] else 'right'
+             else:
+                 if yolo_obs['is_right']:
+                     soft_obstacle_dir = 'left'
+                 elif yolo_obs['is_left']:
+                     soft_obstacle_dir = 'right'
+                 elif not soft_obstacle_dir:
+                     soft_obstacle_dir = self._last_turn
+
+         if hard_obstacle:
+             state.patrol_metrics['obstacle_count'] = int(state.patrol_metrics.get('obstacle_count', 0)) + 1
+             state.patrol_drive_state = 'obstacle_detected'
+             if motors:
+                motors.stop()
+                state.motor_state = motors.state
+                state.speed = motors.speed
+             time.sleep(0.1)
+
+             now = time.monotonic()
+             if now - self._last_escape_ts < 3.0:
+                 self._consecutive_blocks += 1
+             else:
+                 self._consecutive_blocks = 1
+             self._last_escape_ts = now
+
+             if self._consecutive_blocks > self._config.get('memory_max_repeats', 3):
+                 self.logger.warning('Consecutive blocks max reached (%d), entered trapped state', self._consecutive_blocks)
+                 state.patrol_drive_state = 'trapped'
+                 self._stop_motion()
+                 return # Exit frame
+
+             self._reverse_once()
+             direction = soft_obstacle_dir or self._choose_turn_direction()
+             self._turn_once(direction)
+             state.patrol_drive_state = 'recovering'
+             time.sleep(0.15)
+         else:
+             self._consecutive_blocks = 0
+             if state.patrol_drive_state != 'forward':
+                 state.patrol_drive_state = 'forward'
+
+             if steering:
+                 if soft_obstacle_dir == 'left':
+                     steering.left()
+                 elif soft_obstacle_dir == 'right':
+                     steering.right()
+                 else:
+                     ang = steering.angle
+                     cen = steering.center_angle
+                     if ang > cen + 2:
+                         steering.set_angle(ang - 2)
+                     elif ang < cen - 2:
+                         steering.set_angle(ang + 2)
+                     else:
+                         steering.center()
+                 state.steering_angle = steering.angle
+
+             if motors:
+                 motors.forward(self._config.get('speed', 35))
+                 state.motor_state = motors.state
+                 state.speed = motors.speed
+             time.sleep(0.05)
+             
+         self._update_scan()
 
     def _loop(self):
         tick_history = []
@@ -352,81 +603,26 @@ class PatrolService:
                     continue
 
             try:
-                yolo_obs = self._get_yolo_obstacle()
+                # 1. Evaluate Targets
+                target = None
+                target_classes = getattr(self.runtime.state, 'patrol_targets', [])
+                detections = getattr(self.runtime.state, 'vision_detections', [])
                 
-                hard_obstacle = False
-                soft_obstacle_dir = None
-                avoid_dist = self._config.get('avoidance_distance_cm', 30)
-
-                if distance is not None:
-                    if distance < avoid_dist:
-                        hard_obstacle = True
-                    elif distance < avoid_dist * 1.8:
-                        soft_obstacle_dir = self._last_turn
-
-                if yolo_obs:
-                    if yolo_obs['area_ratio'] > 0.25:
-                        hard_obstacle = True
-                        if not soft_obstacle_dir:
-                            soft_obstacle_dir = 'left' if yolo_obs['is_right'] else 'right'
-                    else:
-                        if yolo_obs['is_right']:
-                            soft_obstacle_dir = 'left'
-                        elif yolo_obs['is_left']:
-                            soft_obstacle_dir = 'right'
-                        elif not soft_obstacle_dir:
-                            soft_obstacle_dir = self._last_turn
-
-                if hard_obstacle:
-                    state.patrol_metrics['obstacle_count'] = int(state.patrol_metrics.get('obstacle_count', 0)) + 1
-                    state.patrol_drive_state = 'obstacle_detected'
-                    motors.stop()
-                    state.motor_state = motors.state
-                    state.speed = motors.speed
-                    time.sleep(0.1)
-
-                    now = time.monotonic()
-                    if now - self._last_escape_ts < 3.0:
-                        self._consecutive_blocks += 1
-                    else:
-                        self._consecutive_blocks = 1
-                    self._last_escape_ts = now
-
-                    if self._consecutive_blocks > self._config.get('memory_max_repeats', 3):
-                        self.logger.warning('Consecutive blocks max reached (%d), entered trapped state', self._consecutive_blocks)
-                        state.patrol_drive_state = 'trapped'
-                        self._stop_motion()
-                        continue
-
-                    self._reverse_once()
-                    direction = soft_obstacle_dir or self._choose_turn_direction()
-                    self._turn_once(direction)
-                    state.patrol_drive_state = 'recovering'
-                    time.sleep(0.15)
+                for det in detections:
+                    if getattr(det, 'label', '') in target_classes:
+                        # Favor closest/largest targets
+                        if not target or getattr(det, 'confidence', 0) > getattr(target, 'confidence', 0):
+                            target = det
+                            
+                action = self._config.get('action_on_detect', 'follow')
+                
+                if target and action == 'follow':
+                    self._follow_target(target, distance)
+                elif target and action == 'log':
+                    self._log_target(target)
                 else:
-                    self._consecutive_blocks = 0
-                    if state.patrol_drive_state != 'forward':
-                        state.patrol_drive_state = 'forward'
-
-                    if soft_obstacle_dir == 'left':
-                        steering.left()
-                    elif soft_obstacle_dir == 'right':
-                        steering.right()
-                    else:
-                        ang = steering.angle
-                        cen = steering.center_angle
-                        if ang > cen + 2:
-                            steering.set_angle(ang - 2)
-                        elif ang < cen - 2:
-                            steering.set_angle(ang + 2)
-                        else:
-                            steering.center()
-                    state.steering_angle = steering.angle
-
-                    motors.forward(self._config.get('speed', 35))
-                    state.motor_state = motors.state
-                    state.speed = motors.speed
-                    time.sleep(0.05)
+                    self._patrol_drive(distance)
+                    
             except RuntimeError as exc:
                 state.patrol_last_error = str(exc)
                 state.patrol_drive_state = 'locked'
@@ -439,7 +635,6 @@ class PatrolService:
                 self._stop_motion()
                 time.sleep(0.25)
             finally:
-                self._update_scan()
                 dt = max(0.0001, time.monotonic() - t0)
                 tick_history.append(dt)
                 if len(tick_history) > 20:

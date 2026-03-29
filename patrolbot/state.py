@@ -58,29 +58,26 @@ class RuntimeState:
     patrol_disable_reason: str | None = None
     patrol_last_error: str | None = None
 
-    tracking_enabled: bool = False
-    tracking_mode: str = 'camera_track'
-    tracking_detector: str = 'face'
-    tracking_target_acquired: bool = False
-    tracking_box: dict[str, Any] | None = None
-    tracking_target_label: str | None = None
-    tracking_target_confidence: float | None = None
-    tracking_frame_size: dict[str, int] | None = None
-    tracking_last_error: str | None = None
-    tracking_last_detection_count: int = 0
-    tracking_detector_available: bool = False
-    tracking_detector_status: str = 'inactive'
-    tracking_detector_details: dict[str, Any] = field(default_factory=dict)
-    tracking_yolo_available: bool = False
-    tracking_preferred_target: str = 'largest'
-    tracking_scan_active: bool = False
-    tracking_metrics: dict[str, Any] = field(default_factory=dict)
-    tracking_fps_actual: float = 0.0
-    tracking_mjpeg_clients: int = 0
-    tracking_follow_distance_cm: float | None = None
-    tracking_follow_state: str = 'stopped'
-    tracking_disable_reason: str | None = None
-    tracking_overlay_enabled: bool = True
+    vision_enabled: bool = False
+    vision_detector: str = 'face'
+    vision_target_acquired: bool = False
+    vision_box: dict[str, Any] | None = None
+    vision_target_label: str | None = None
+    vision_target_confidence: float | None = None
+    vision_frame_size: dict[str, int] | None = None
+    vision_last_error: str | None = None
+    vision_last_detection_count: int = 0
+    vision_detector_available: bool = False
+    vision_detector_status: str = 'inactive'
+    vision_detector_details: dict[str, Any] = field(default_factory=dict)
+    vision_yolo_available: bool = False
+    vision_preferred_target: str = 'largest'
+    vision_metrics: dict[str, Any] = field(default_factory=dict)
+    vision_fps_actual: float = 0.0
+    vision_mjpeg_clients: int = 0
+    vision_disable_reason: str | None = None
+    vision_overlay_enabled: bool = True
+    vision_detections: list[Any] = field(default_factory=list)
 
     snapshot_last_saved: str | None = None
     snapshot_count: int = 0

@@ -7,7 +7,7 @@ from patrolbot.api.routes_patrol import register_patrol_routes
 from patrolbot.api.routes_settings import register_settings_routes
 from patrolbot.api.routes_status import register_status_routes
 from patrolbot.api.routes_system import register_system_routes
-from patrolbot.api.routes_tracking import register_tracking_routes
+from patrolbot.api.routes_vision import register_vision_routes
 from patrolbot.config import load_config
 from patrolbot.logging_setup import setup_logging
 from patrolbot.services.safety import safe_shutdown
@@ -32,7 +32,7 @@ def create_app() -> Flask:
     register_settings_routes(app)
     register_system_routes(app)
     register_network_routes(app)
-    register_tracking_routes(app)
+    register_vision_routes(app)
     register_patrol_routes(app)
 
     @app.get('/healthz')
