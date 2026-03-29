@@ -186,9 +186,11 @@ class PatrolService:
             return
         try:
             if direction == 'left':
-                steering.left()
+                val = steering.max_angle if getattr(steering, 'invert', False) else steering.min_angle
+                steering.set_angle(val)
             else:
-                steering.right()
+                val = steering.min_angle if getattr(steering, 'invert', False) else steering.max_angle
+                steering.set_angle(val)
             self.runtime.state.steering_angle = steering.angle
             motors.forward(self._config.get('speed', 35))
             self.runtime.state.motor_state = motors.state
@@ -216,8 +218,6 @@ class PatrolService:
             return None
 
     def _get_yolo_obstacle(self) -> dict | None:
-        if not self.runtime.state.tracking_enabled:
-            return None
         tracking = getattr(self.runtime, 'tracking', None)
         if not tracking:
             return None

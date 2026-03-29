@@ -724,21 +724,37 @@ class TrackingService:
                     self._last_steer_angle = float(center)
                 current_angle = float(self._last_steer_angle)
                 
-                # Check jitter against raw target angle, not smoothed delta
-                if abs(target_angle - current_angle) < jitter_deg:
-                    target_angle = current_angle
+                # Calculate raw target angle directly mapped from proportional control error
+                target_angle = float(center + (norm_err * steer_range * steer_gain))
+                target_angle = max(float(min_a), min(float(max_a), target_angle))
+
+                if self._last_steer_angle is None:
+                    self._last_steer_angle = float(center)
+                current_angle = float(self._last_steer_angle)
                     
+                # Smooth the progression towards the target angle
                 smoothed = (steer_alpha * target_angle) + ((1.0 - steer_alpha) * current_angle)
                 delta = smoothed - current_angle
                 
+                # Enforce max step speed limit 
                 if delta > max_step:
                     smoothed = current_angle + max_step
                 elif delta < -max_step:
                     smoothed = current_angle - max_step
                     
-                self._last_steer_angle = max(float(min_a), min(float(max_a), smoothed))
+                # Apply anti-jitter deadzone to the FINAL integer command sent to servo, not the continuous math
+                next_angle = int(round(smoothed))
+                last_commanded = int(round(current_angle))
+                
+                if abs(next_angle - last_commanded) < max(1, int(jitter_deg)):
+                    # Don't micro-step the physical servo if it's within the jitter margin
+                    # but DO update the internal continuous float so the math integrates properly!
+                    self._last_steer_angle = max(float(min_a), min(float(max_a), smoothed))
+                    curr_angle = last_commanded
+                else:
+                    self._last_steer_angle = max(float(min_a), min(float(max_a), smoothed))
+                    curr_angle = next_angle
 
-                curr_angle = int(round(self._last_steer_angle))
                 steering.set_angle(curr_angle)
                 self.runtime.state.steering_angle = getattr(steering, 'angle', curr_angle)
                 self.runtime.state.tracking_metrics = {
