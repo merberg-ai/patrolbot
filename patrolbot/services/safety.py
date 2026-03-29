@@ -16,8 +16,8 @@ def safe_shutdown(runtime, logger) -> None:
     try:
         if getattr(runtime, 'telemetry', None):
             runtime.telemetry.stop()
-        if getattr(runtime, 'tracking', None):
-            runtime.tracking.stop()
+        if getattr(runtime, 'vision', None):
+            runtime.vision.stop()
         if getattr(runtime, 'patrol', None):
             runtime.patrol.stop()
         if getattr(runtime, 'status_leds', None):

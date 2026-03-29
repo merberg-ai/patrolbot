@@ -24,8 +24,8 @@ def register_status_routes(app: Flask) -> None:
         if not cam or not cam.running:
             return Response('camera unavailable', status=503, mimetype='text/plain')
         view = str(request.args.get('view', '') or '').strip().lower()
-        if view == 'tracking' and getattr(runtime, 'tracking', None):
-            gen = runtime.tracking.mjpeg()
+        if view == 'vision' and getattr(runtime, 'vision', None):
+            gen = runtime.vision.mjpeg()
         else:
             gen = cam.mjpeg_generator(runtime=runtime)
         return Response(gen, mimetype='multipart/x-mixed-replace; boundary=frame')

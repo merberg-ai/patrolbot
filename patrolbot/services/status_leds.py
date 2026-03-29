@@ -10,7 +10,7 @@ class StatusLedService:
         'WIFI_ERROR': 80,
         'TRAPPED': 70,
         'OBSTACLE_DETECTED': 60,
-        'TRACKING_ACTIVE': 55,
+        'VISION_ACTIVE': 55,
         'PATROL_ACTIVE': 50,
         'WIFI_CONNECTED': 40,
         'READY': 30,
@@ -124,8 +124,8 @@ class StatusLedService:
         if state.patrol_drive_state == 'obstacle_detected':
             self.set_state('OBSTACLE_DETECTED', reason='obstacle detected', force=True)
             return
-        if state.tracking_enabled:
-            self.set_state('TRACKING_ACTIVE', reason='tracking active', force=True)
+        if state.vision_enabled:
+            self.set_state('VISION_ACTIVE', reason='vision active', force=True)
             return
         if state.patrol_enabled:
             self.set_state('PATROL_ACTIVE', reason='patrol active', force=True)

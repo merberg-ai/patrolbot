@@ -45,7 +45,7 @@ def register_system_routes(app: Flask) -> None:
                 'camera_running': bool(runtime.registry.camera and runtime.registry.camera.running),
                 'telemetry_running': bool(runtime.telemetry and getattr(runtime.telemetry, '_thread', None)),
                 'patrol_service': bool(runtime.patrol),
-                'tracking_service': bool(runtime.tracking),
+                'vision_service': bool(runtime.vision),
             },
             'sensors': runtime.state.sensor_status,
             'snapshots': {

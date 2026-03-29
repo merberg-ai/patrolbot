@@ -30,7 +30,7 @@ class YoloDetector(BaseDetector):
         self._enabled = bool(enabled)
         self._yolo_cls = None
         if not self._enabled:
-            self._error = 'disabled by config (set tracking.enable_yolo=true to allow YOLO)'
+            self._error = 'disabled by config (set vision.enable_yolo=true to allow YOLO)'
             return
         try:
             from ultralytics import YOLO

@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     set('system-led', data.led_state);
     set('system-wifi', data.network?.connected ? `${data.network.ssid || 'connected'} · ${data.network.ip || '--'}` : 'offline');
     set('system-camera', data.services?.camera_running ? 'running' : 'offline');
-    set('system-tracking-service', data.services?.tracking_service ? 'loaded' : 'not initialized');
+    set('system-vision-service', data.services?.vision_service ? 'loaded' : 'not initialized');
 
     const v = data.version || {};
     set('ver-string', v.version_string);

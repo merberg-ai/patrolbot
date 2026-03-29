@@ -162,14 +162,13 @@ class TelemetryService:
                 'front_ultrasonic': dict(front_status),
                 'rear_ultrasonic': dict(rear_status),
             },
-            'tracking': {
-                'enabled': state.tracking_enabled,
-                'mode': state.tracking_mode,
-                'detector': state.tracking_detector,
-                'detector_status': state.tracking_detector_status,
-                'detector_available': state.tracking_detector_available,
-                'last_error': state.tracking_last_error,
-                'disable_reason': state.tracking_disable_reason,
+            'vision': {
+                'enabled': state.vision_enabled,
+                'detector': state.vision_detector,
+                'detector_status': state.vision_detector_status,
+                'detector_available': state.vision_detector_available,
+                'last_error': state.vision_last_error,
+                'disable_reason': state.vision_disable_reason,
             },
             'patrol_enabled': state.patrol_enabled,
             'patrol': {

@@ -45,7 +45,7 @@ class GamepadService:
         'tilt_down': None,
         'estop_toggle': 'BTN_B',
         'lights_toggle': 'BTN_A',       # A button
-        'tracking_toggle': None,        # Empty by default
+        'vision_toggle': None,          # Empty by default
         'camera_home': None,
         'steering_center': None
     }
@@ -411,14 +411,14 @@ class GamepadService:
                 self.runtime.status_leds.cycle_preset()
                 self.logger.info("Gamepad: Lights cycled to next preset")
 
-        elif is_mapped('tracking_toggle'):
-            if hasattr(self.runtime, 'tracking') and self.runtime.tracking:
-                self.runtime.tracking.toggle()
-                self.logger.info("Gamepad: Tracking toggled")
+        elif is_mapped('vision_toggle'):
+            if hasattr(self.runtime, 'vision') and self.runtime.vision:
+                self.runtime.vision.toggle()
+                self.logger.info("Gamepad: Vision toggled")
 
         elif is_mapped('camera_home'):
-            tracking_enabled = getattr(self.runtime.state, 'tracking_enabled', False)
-            if reg.camera_servo and not tracking_enabled:
+            vision_enabled = getattr(self.runtime.state, 'vision_enabled', False)
+            if reg.camera_servo and not vision_enabled:
                 reg.camera_servo.home()
                 self._pan_target = reg.camera_servo.pan_angle
                 self._tilt_target = reg.camera_servo.tilt_angle
@@ -433,8 +433,8 @@ class GamepadService:
             if self._btn_held and getattr(self, 'runtime', None) and self.runtime.registry:
                 reg = self.runtime.registry
                 moved = False
-                tracking_enabled = getattr(self.runtime.state, 'tracking_enabled', False)
-                if reg.camera_servo and not tracking_enabled:
+                vision_enabled = getattr(self.runtime.state, 'vision_enabled', False)
+                if reg.camera_servo and not vision_enabled:
                     if 'pan_left' in self._btn_held:
                         reg.camera_servo.pan_left()
                         self._pan_target = reg.camera_servo.pan_angle
@@ -520,10 +520,10 @@ class GamepadService:
             reg.steering.set_angle(steer_out)
 
         # Camera: direct stick-to-angle mapping, honoring invert + center.
-        tracking_enabled = getattr(self.runtime.state, 'tracking_enabled', False)
+        vision_enabled = getattr(self.runtime.state, 'vision_enabled', False)
         
         moved = False
-        if not tracking_enabled:
+        if not vision_enabled:
             pan_axis = m.get('pan', 'ABS_RX')
             tilt_axis = m.get('tilt', 'ABS_RY')
             pan_norm = self._normalize_stick(pan_axis, self.axis_state.get(pan_axis, 0))
