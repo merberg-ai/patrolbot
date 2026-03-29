@@ -97,6 +97,13 @@ class PatrolService:
         self.runtime.state.mode = 'patrol'
         self.runtime.state.patrol_disable_reason = None
         self.logger.info('Patrol enabled')
+        
+        # Turn off tracking to avoid conflicting UI states, but our modified
+        # TrackingService engine will still passively provide YOLO detections.
+        if getattr(self.runtime.state, 'tracking_enabled', False):
+            tracking = getattr(self.runtime, 'tracking', None)
+            if tracking:
+                tracking.disable(reason='patrol_override')
 
     def disable(self, reason: str = 'user'):
         self._config['enabled'] = False

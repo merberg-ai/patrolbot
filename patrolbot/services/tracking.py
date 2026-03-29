@@ -325,6 +325,12 @@ class TrackingService:
             return
         self.set_enabled(True, persist=True)
 
+        # Mutually exclusive with Patrol mode to prevent fighting
+        if getattr(self.runtime.state, 'patrol_enabled', False):
+            patrol = getattr(self.runtime, 'patrol', None)
+            if patrol:
+                patrol.disable(reason='tracking_override')
+
     def disable(self, reason: str | None = None):
         self.set_enabled(False, persist=True)
         self.runtime.state.tracking_target_acquired = False
@@ -843,10 +849,15 @@ class TrackingService:
             frame_counter += 1
             every_n = max(1, int(cfg.get('process_every_n_frames', 3)))
             process_this = (frame_counter % every_n == 0)
-            tracking_active = bool(self.runtime.state.tracking_enabled) and self.runtime.state.tracking_mode != 'off'
-            detections = self._latest_detections if tracking_active else []
-            target = self._latest_target if tracking_active else None
-            if process_this and tracking_active:
+            tracking_enabled = bool(self.runtime.state.tracking_enabled)
+            tracking_active = tracking_enabled and self.runtime.state.tracking_mode != 'off'
+            patrol_enabled = bool(self.runtime.state.patrol_enabled)
+            process_active = tracking_active or patrol_enabled
+
+            detections = self._latest_detections if process_active else []
+            target = self._latest_target if process_active else None
+
+            if process_this and process_active:
                 try:
                     suppress_motion = (
                         cfg.get('detector') == 'motion' and
@@ -886,7 +897,7 @@ class TrackingService:
                     detections = []
                     target = None
                     self.logger.exception('Detector failure: %s', exc)
-            elif not tracking_active:
+            elif not process_active:
                 self._latest_detections = []
                 self._latest_target = None
                 self.runtime.state.tracking_last_detection_count = 0
@@ -903,7 +914,7 @@ class TrackingService:
                     self.disable(reason='motion_blocked')
 
             mode = self.runtime.state.tracking_mode
-            if self.runtime.state.tracking_enabled and mode != 'off':
+            if tracking_active and not patrol_enabled:
                 if mode == 'object_follow':
                     # Object follow: servo tracking + motor drive + steering
                     self._follow_target(frame, target)
