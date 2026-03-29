@@ -1,3 +1,4 @@
 *.pyc
 roadmap.txt
 /venv
+*.pt

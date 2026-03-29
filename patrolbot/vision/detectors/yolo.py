@@ -77,7 +77,6 @@ class YoloDetector(BaseDetector):
             conf=self.confidence_min,
             max_det=self.max_results,
             imgsz=self.imgsz,
-            device='cpu',
         )
         out = []
         if not results:
@@ -87,10 +86,10 @@ class YoloDetector(BaseDetector):
         boxes = getattr(result, 'boxes', None)
         if boxes is None:
             return out
-        for box in boxes:
-            cls_id = int(box.cls[0].item())
-            conf = float(box.conf[0].item())
-            x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+        for i in range(len(boxes)):
+            cls_id = int(boxes.cls[i].item())
+            conf = float(boxes.conf[i].item())
+            x1, y1, x2, y2 = [int(v) for v in boxes.xyxy[i].tolist()]
             label = str(names.get(cls_id, cls_id)).lower()
             if self.class_names and label not in self.class_names:
                 continue

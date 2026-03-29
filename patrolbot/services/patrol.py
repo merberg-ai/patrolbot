@@ -331,14 +331,14 @@ class PatrolService:
                     state.patrol_drive_state = 'recovering'
                     time.sleep(0.15)
                 else:
+                    self._consecutive_blocks = 0
                     if state.patrol_drive_state != 'forward':
-                        self._consecutive_blocks = 0
                         steering.center()
                         state.steering_angle = steering.angle
                         state.patrol_drive_state = 'forward'
-                        motors.forward(self._config.get('speed', 35))
-                        state.motor_state = motors.state
-                        state.speed = motors.speed
+                    motors.forward(self._config.get('speed', 35))
+                    state.motor_state = motors.state
+                    state.speed = motors.speed
                     time.sleep(0.05)
             except RuntimeError as exc:
                 state.patrol_last_error = str(exc)
