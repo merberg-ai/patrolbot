@@ -6,9 +6,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     set('system-ip', data.ip);
     set('system-mode', data.mode);
     set('system-led', data.led_state);
-    set('system-wifi', data.network?.connected ? `${data.network.ssid || 'connected'} · ${data.network.ip || '--'}` : 'offline');
-    set('system-camera', data.services?.camera_running ? 'running' : 'offline');
-    set('system-vision-service', data.services?.vision_service ? 'loaded' : 'not initialized');
+    const wifi = data.network || {};
+    set('system-wifi', wifi.connected ? `${wifi.ssid || 'connected'} · ${wifi.ip || '--'}` : 'offline');
+    const services = data.services || {};
+    set('system-camera', services.camera_running ? 'running' : 'offline');
+    set('system-vision-service', services.vision_service ? 'loaded' : 'not initialized');
 
     const v = data.version || {};
     set('ver-string', v.version_string);
@@ -43,7 +45,8 @@ async function loadLogs() {
   if (document.body.dataset.page !== 'system') return;
   const viewer = document.getElementById('system-log-viewer');
   const msg = document.getElementById('logs-message');
-  const limit = Number(document.getElementById('log-line-limit')?.value || 250);
+  const logLimitEl = document.getElementById('log-line-limit');
+  const limit = Number((logLimitEl ? logLimitEl.value : '') || 250);
   try {
     const data = await window.patrolbotApi.getLogs(limit);
     if (viewer) viewer.textContent = (data.lines || []).join('\n');

@@ -1,3 +1,5 @@
+console.log("[LOADED] patrol.js initializing...");
+
 function patrolLog(message){
   const consoleEl = document.getElementById('patrol-console');
   if(!consoleEl) return;
@@ -161,7 +163,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   const toggleBtn = document.getElementById('patrol-toggle');
   if(toggleBtn) toggleBtn.addEventListener('click', async()=>{
-    const enabledNow = (document.getElementById('patrol-enabled')?.textContent || '').trim() === 'ON';
+    const statusEl = document.getElementById('patrol-enabled');
+    const enabledNow = (statusEl ? (statusEl.textContent || '') : '').trim() === 'ON';
     try{
       if(enabledNow){
         await window.patrolbotApi.disablePatrol();
@@ -173,12 +176,14 @@ document.addEventListener('DOMContentLoaded', ()=>{
         setActionMessage('Patrol enabled.', 'success');
         
         // Ensure vision stream gets started if not on
-        window.patrolbotState?.refreshTimer && window.patrolbotApi.enableVision().catch(()=>{});
+        if (window.patrolbotState && window.patrolbotState.refreshTimer) {
+             window.patrolbotApi.enableVision().catch(()=>{});
+        }
       }
       refreshPatrolState();
       refreshStatus().catch(()=>{});
     }catch(err){
-      patrolLog(enabledNow ? 'Failed to disable patrol.' : 'Failed to enable patrol.');
+      patrolLog((enabledNow ? 'Failed to disable patrol.' : 'Failed to enable patrol.') + ' Error: ' + err);
       setActionMessage(enabledNow ? 'Failed to disable patrol.' : 'Failed to enable patrol.', 'error');
     }
   });
@@ -195,4 +200,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
       setActionMessage('Failed to clear E-stop latch.', 'error');
     }
   });
+  patrolLog('Patrol Console script initialized.');
 });

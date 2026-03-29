@@ -12,7 +12,7 @@ def _state_payload(runtime):
         'targets': state.patrol_targets,
         'detect_count': state.patrol_detect_count,
         'last_detected': state.patrol_last_detected,
-        'metrics': state.patrol_metrics,
+        'metrics': dict(state.patrol_metrics or {}),
         'disable_reason': state.patrol_disable_reason,
         'last_error': state.patrol_last_error,
     }
