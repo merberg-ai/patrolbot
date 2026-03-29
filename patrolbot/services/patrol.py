@@ -56,6 +56,9 @@ class PatrolService:
         self._last_log_ts = 0.0
         self._last_steer_angle = None
         self._follow_distance_ema = None
+        self._last_target_signature = None
+        self._last_target_ts = 0.0
+        self._last_obstacle_label = None
         self._sync_state_basics()
 
     def _normalize(self, source: dict) -> dict:
@@ -111,10 +114,46 @@ class PatrolService:
         metrics.setdefault('obstacle_count', 0)
         metrics.setdefault('last_turn', None)
         metrics.setdefault('loop_hz', 0.0)
+        metrics.setdefault('last_target_score', None)
         state.patrol_metrics = metrics
+        state.patrol_last_event = state.patrol_last_event if isinstance(state.patrol_last_event, dict) else None
+        state.patrol_recent_events = list(state.patrol_recent_events or [])[-25:]
 
     def get_config(self):
         return dict(self._config)
+
+    def _record_event(self, event: str, **fields):
+        state = self.runtime.state
+        payload = {'ts': round(time.time(), 3), 'event': event}
+        payload.update({k: v for k, v in fields.items() if v is not None})
+        state.patrol_last_event = payload
+        state.patrol_event_count = int(getattr(state, 'patrol_event_count', 0) or 0) + 1
+        events = list(getattr(state, 'patrol_recent_events', []) or [])
+        events.append(payload)
+        state.patrol_recent_events = events[-25:]
+        return payload
+
+    def _vision_patch_for_patrol(self) -> dict:
+        classes = [str(x).lower() for x in (self._config.get('target_classes') or []) if str(x).strip()]
+        return {
+            'enabled': True,
+            'enable_yolo': True,
+            'detector': 'yolo',
+            'yolo_classes': classes,
+        }
+
+    def _ensure_patrol_vision(self):
+        vision = getattr(self.runtime, 'vision', None)
+        if not vision:
+            return
+        desired = self._vision_patch_for_patrol()
+        current = vision.get_config() if hasattr(vision, 'get_config') else {}
+        needs_update = any(current.get(k) != v for k, v in desired.items())
+        if needs_update:
+            vision.update_config(desired, persist=True)
+            self.logger.info('Patrol aligned vision for YOLO target mode: detector=%s classes=%s', desired['detector'], ','.join(desired['yolo_classes']) or 'all')
+        if not getattr(self.runtime.state, 'vision_enabled', False):
+            vision.enable()
 
     def update_config(self, patch: dict, persist: bool = True):
         merged = dict(self._config)
@@ -123,13 +162,8 @@ class PatrolService:
         self.runtime.config['patrol'] = dict(self._config)
         self._sync_state_basics()
 
-        # If Patrol wants YOLO, make sure VisionService is configured for it
         if self._config.get('enabled'):
-            vision_cfg = self.runtime.vision.get_config() if getattr(self.runtime, 'vision', None) else {}
-            if not vision_cfg.get('enable_yolo') or not vision_cfg.get('enabled'):
-                if getattr(self.runtime, 'vision', None):
-                    self.runtime.vision.update_config({'enabled': True, 'enable_yolo': True})
-                    self.logger.info("Patrol mode automatically enabled Vision Service with YOLO.")
+            self._ensure_patrol_vision()
 
         if persist:
             runtime_cfg = load_runtime_config()
@@ -143,14 +177,9 @@ class PatrolService:
         self.update_config({'enabled': True}, persist=True)
         self.runtime.state.mode = 'patrol'
         self.runtime.state.patrol_disable_reason = None
+        self._ensure_patrol_vision()
+        self._record_event('patrol_enabled', targets=list(self._config.get('target_classes', [])))
         self.logger.info('Patrol enabled')
-        
-        # Turn off tracking to avoid conflicting UI states, but our modified
-        # VisionService engine will still passively provide YOLO detections.
-        if getattr(self.runtime.state, 'vision_enabled', False) is False:
-            vision = getattr(self.runtime, 'vision', None)
-            if vision:
-                vision.enable()
 
     def disable(self, reason: str = 'user'):
         self._config['enabled'] = False
@@ -159,6 +188,7 @@ class PatrolService:
         self.runtime.state.mode = 'idle'
         self.runtime.state.patrol_drive_state = 'idle'
         self.runtime.state.patrol_disable_reason = reason
+        self._record_event('patrol_disabled', reason=reason)
         self.logger.info('Patrol disabled: %s', reason)
 
     def toggle(self):
@@ -306,6 +336,61 @@ class PatrolService:
 
         return max(obstacles, key=lambda o: o['area_ratio'])
 
+
+    def _target_signature(self, target):
+        return (
+            getattr(target, 'label', 'unknown'),
+            int(getattr(target, 'center_x', 0) / 20),
+            int(getattr(target, 'center_y', 0) / 20),
+            int(getattr(target, 'w', 0) / 20),
+            int(getattr(target, 'h', 0) / 20),
+        )
+
+    def _score_target(self, det, frame_w: int, frame_h: int) -> float:
+        conf = float(getattr(det, 'confidence', 0.0) or 0.0)
+        area = float(getattr(det, 'area', getattr(det, 'w', 0) * getattr(det, 'h', 0)) or 0.0)
+        frame_area = max(1.0, float(frame_w * frame_h))
+        area_ratio = area / frame_area
+        center_x = float(getattr(det, 'center_x', frame_w / 2.0))
+        center_y = float(getattr(det, 'center_y', frame_h / 2.0))
+        norm_dx = abs(center_x - (frame_w / 2.0)) / max(1.0, frame_w / 2.0)
+        norm_dy = abs(center_y - (frame_h / 2.0)) / max(1.0, frame_h / 2.0)
+        center_bonus = max(0.0, 1.0 - ((norm_dx * 0.7) + (norm_dy * 0.3)))
+        score = (conf * 2.5) + (area_ratio * 6.0) + center_bonus
+        signature = self._target_signature(det)
+        if self._last_target_signature and signature[0] == self._last_target_signature[0]:
+            if signature == self._last_target_signature:
+                score += 2.5
+            else:
+                dx = abs(signature[1] - self._last_target_signature[1])
+                dy = abs(signature[2] - self._last_target_signature[2])
+                if dx <= 2 and dy <= 2:
+                    score += 1.2
+        return score
+
+    def _select_target(self):
+        target_classes = [str(x).lower() for x in (self._config.get('target_classes') or []) if str(x).strip()]
+        if not target_classes:
+            return None
+        frame_size = self.runtime.state.vision_frame_size or (640, 480)
+        frame_w, frame_h = int(frame_size[0]), int(frame_size[1])
+        vision = getattr(self.runtime, 'vision', None)
+        tracker_target = vision.get_latest_target() if vision and hasattr(vision, 'get_latest_target') else None
+        candidates = []
+        if tracker_target and str(getattr(tracker_target, 'label', '')).lower() in target_classes:
+            candidates.append(tracker_target)
+        detections = vision.get_latest_detections() if vision and hasattr(vision, 'get_latest_detections') else getattr(self.runtime.state, 'vision_detections', [])
+        for det in detections or []:
+            if str(getattr(det, 'label', '')).lower() in target_classes:
+                candidates.append(det)
+        if not candidates:
+            return None
+        scored = [(self._score_target(det, frame_w, frame_h), det) for det in candidates]
+        scored.sort(key=lambda item: item[0], reverse=True)
+        best_score, best = scored[0]
+        self.runtime.state.patrol_metrics['last_target_score'] = round(float(best_score), 3)
+        return best
+
     def _reverse_once(self):
         motors = self.runtime.registry.motors
         if not motors:
@@ -315,9 +400,11 @@ class PatrolService:
         rear_dist = self._measure_rear_distance()
         self.runtime.state.patrol_metrics['last_rear_distance_cm'] = rear_dist
         if rear_dist is not None and rear_dist < 15.0:
+            self._record_event('reverse_blocked', distance_cm=round(float(rear_dist),1))
             self.logger.info('Rear blocked (%.1fcm), skipping reverse', rear_dist)
             return
 
+        self._record_event('reverse_started', distance_cm=rear_dist)
         motors.backward(self._config.get('reverse_speed', 28))
         self.runtime.state.motor_state = motors.state
         self.runtime.state.speed = motors.speed
@@ -378,24 +465,28 @@ class PatrolService:
         self.runtime.state.patrol_drive_state = 'investigating'
         self.runtime.state.patrol_last_detected = target.label
         self.runtime.state.patrol_detect_count += 1
-        
+
         now = time.time()
-        if (now - self._last_log_ts) < 5.0: # Backoff
+        if (now - self._last_log_ts) < 5.0:
             return
         self._last_log_ts = now
-        
-        self.logger.info("Target Detected: %s (Conf: %.2f)", target.label, getattr(target, 'confidence', 1.0))
+
+        conf = round(float(getattr(target, 'confidence', 1.0) or 1.0), 3)
+        self.logger.info('Target Detected: %s (Conf: %.2f)', target.label, conf)
+        self._record_event('target_logged', label=target.label, confidence=conf)
         self._stop_motion()
-        
+
         if self._config.get('save_screenshots'):
             snapshots = getattr(self.runtime, 'snapshots', None)
             if snapshots:
                 try:
-                    snapshots.take_snapshot(reason=f"Target {target.label} detected")
+                    snap = snapshots.take_snapshot(reason=f'Target {target.label} detected', label=target.label)
+                    self._record_event('snapshot_saved', label=target.label, snapshot=snap.get('name'))
                 except Exception as e:
-                    self.logger.error("Failed to save snapshot: %s", e)
-                    
-        time.sleep(2.0) # Pause to look at it, then resume patrol
+                    self.logger.error('Failed to save snapshot: %s', e)
+                    self._record_event('snapshot_failed', label=target.label, error=str(e))
+
+        time.sleep(2.0)
 
     def _follow_target(self, target, distance):
         cfg = self._config
@@ -513,6 +604,12 @@ class PatrolService:
 
          if hard_obstacle:
              state.patrol_metrics['obstacle_count'] = int(state.patrol_metrics.get('obstacle_count', 0)) + 1
+             if yolo_obs and self._last_obstacle_label != yolo_obs.get('label'):
+                 self._record_event('obstacle_detected', label=yolo_obs.get('label'), area_ratio=round(float(yolo_obs.get('area_ratio', 0.0)), 3), distance_cm=distance)
+                 self._last_obstacle_label = yolo_obs.get('label')
+             elif distance is not None and self._last_obstacle_label != 'ultrasonic':
+                 self._record_event('obstacle_detected', label='ultrasonic', distance_cm=distance)
+                 self._last_obstacle_label = 'ultrasonic'
              state.patrol_drive_state = 'obstacle_detected'
              if motors:
                 motors.stop()
@@ -529,6 +626,7 @@ class PatrolService:
 
              if self._consecutive_blocks > self._config.get('memory_max_repeats', 3):
                  self.logger.warning('Consecutive blocks max reached (%d), entered trapped state', self._consecutive_blocks)
+                 self._record_event('trapped_entered', repeats=self._consecutive_blocks)
                  state.patrol_drive_state = 'trapped'
                  self._stop_motion()
                  return # Exit frame
@@ -540,6 +638,7 @@ class PatrolService:
              time.sleep(0.15)
          else:
              self._consecutive_blocks = 0
+             self._last_obstacle_label = None
              if state.patrol_drive_state != 'forward':
                  state.patrol_drive_state = 'forward'
 
@@ -603,24 +702,25 @@ class PatrolService:
                     continue
 
             try:
-                # 1. Evaluate Targets
-                target = None
-                target_classes = getattr(self.runtime.state, 'patrol_targets', [])
-                detections = getattr(self.runtime.state, 'vision_detections', [])
-                
-                for det in detections:
-                    if getattr(det, 'label', '') in target_classes:
-                        # Favor closest/largest targets
-                        if not target or getattr(det, 'confidence', 0) > getattr(target, 'confidence', 0):
-                            target = det
-                            
+                self._ensure_patrol_vision()
+                target = self._select_target()
                 action = self._config.get('action_on_detect', 'follow')
-                
+
+                if target:
+                    sig = self._target_signature(target)
+                    if sig != self._last_target_signature:
+                        self._record_event('target_acquired', label=target.label, confidence=round(float(getattr(target, 'confidence', 1.0) or 1.0), 3))
+                    self._last_target_signature = sig
+                    self._last_target_ts = time.monotonic()
+
                 if target and action == 'follow':
                     self._follow_target(target, distance)
                 elif target and action == 'log':
                     self._log_target(target)
                 else:
+                    if self._last_target_signature and (time.monotonic() - self._last_target_ts) > 1.5:
+                        self._record_event('target_lost')
+                        self._last_target_signature = None
                     self._patrol_drive(distance)
                     
             except RuntimeError as exc:

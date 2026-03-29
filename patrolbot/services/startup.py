@@ -147,7 +147,7 @@ class StartupManager:
                 self._mark_sensor_unprobed(runtime, 'ultrasonic_rear', 'rear_ultrasonic')
             registry.battery = BatteryMonitor(self.config, self.logger)
 
-            runtime.snapshots = SnapshotService(self.config, self.logger)
+            runtime.snapshots = SnapshotService(self.config, self.logger, runtime=runtime)
             state.snapshot_count = len(runtime.snapshots.list_snapshots())
 
             registry.camera = CameraWrapper(self.config, self.logger)

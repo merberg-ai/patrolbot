@@ -54,6 +54,9 @@ class RuntimeState:
     patrol_targets: list[str] = field(default_factory=list)
     patrol_detect_count: int = 0
     patrol_last_detected: str | None = None
+    patrol_last_event: dict[str, Any] | None = None
+    patrol_event_count: int = 0
+    patrol_recent_events: list[dict[str, Any]] = field(default_factory=list)
     patrol_metrics: dict[str, Any] = field(default_factory=dict)
     patrol_disable_reason: str | None = None
     patrol_last_error: str | None = None

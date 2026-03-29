@@ -41,7 +41,8 @@ class VisionService:
         self.logger = logger
         self._stop = threading.Event()
         self._thread = None
-        self._config = self._normalize(dict(runtime.config.get('vision', {})))
+        vision_cfg = runtime.config.get('vision') or runtime.config.get('tracking') or {}
+        self._config = self._normalize(dict(vision_cfg))
 
         self._detector = build_detector(self._config.get('detector', 'face'), self._config)
         self._tracker = VisionTracker(self._config)
@@ -194,6 +195,7 @@ class VisionService:
         if persist:
             runtime_cfg = load_runtime_config()
             runtime_cfg['vision'] = dict(self._config)
+            runtime_cfg['tracking'] = dict(self._config)
             save_runtime_config(runtime_cfg)
         return dict(self._config), warnings
 
@@ -207,6 +209,7 @@ class VisionService:
         if persist:
             runtime_cfg = load_runtime_config()
             runtime_cfg['vision'] = dict(self._config)
+            runtime_cfg['tracking'] = dict(self._config)
             save_runtime_config(runtime_cfg)
 
     def enable(self):
@@ -248,6 +251,25 @@ class VisionService:
 
     def _choose_target(self, detections, frame_w, frame_h):
         return self._tracker.choose_target(detections, frame_w, frame_h)
+
+    def get_latest_target(self):
+        return self._latest_target
+
+    def get_latest_detections(self):
+        return list(self._latest_detections or [])
+
+    def render_snapshot_frame(self, frame):
+        if frame is None:
+            return None
+        detections = self._latest_detections if self.runtime.state.vision_enabled else []
+        target = self._latest_target if self.runtime.state.vision_enabled else None
+        if not bool(self._config.get('overlay_enabled', True)):
+            return frame
+        try:
+            return self._draw_overlay(frame.copy(), detections or [], target)
+        except Exception as exc:
+            self.logger.warning('Vision snapshot overlay failed: %s', exc)
+            return frame
 
     def _draw_overlay(self, frame, detections, target):
         import cv2

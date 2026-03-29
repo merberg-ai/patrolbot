@@ -95,7 +95,7 @@ def register_vision_routes(app: Flask) -> None:
     @app.get('/api/vision/config')
     def vision_config():
         runtime = current_app.config['PATROLBOT_RUNTIME']
-        cfg = runtime.vision.get_config() if runtime.vision else _normalize_vision_config(runtime.config.get('vision', {}))
+        cfg = runtime.vision.get_config() if runtime.vision else _normalize_vision_config(runtime.config.get('vision') or runtime.config.get('tracking', {}))
         return {'ok': True, 'config': cfg, 'servo': _servo_payload(runtime), 'camera': _camera_payload(runtime)}
 
     @app.get('/api/vision/detectors')
@@ -138,10 +138,12 @@ def register_vision_routes(app: Flask) -> None:
         if runtime.vision:
             normalized, warnings = runtime.vision.update_config(vision_patch, persist=True)
         else:
-            normalized = _normalize_vision_config({**runtime.config.get('vision', {}), **vision_patch})
+            normalized = _normalize_vision_config({**(runtime.config.get('vision') or runtime.config.get('tracking', {})), **vision_patch})
             runtime.config['vision'] = dict(normalized)
+            runtime.config['tracking'] = dict(normalized)
             runtime_cfg = load_runtime_config()
             runtime_cfg['vision'] = dict(normalized)
+            runtime_cfg['tracking'] = dict(normalized)
             warnings = ['vision service not initialized; config saved only']
             save_runtime_config(runtime_cfg)
             runtime.state.vision_detector = normalized.get('detector', runtime.state.vision_detector)

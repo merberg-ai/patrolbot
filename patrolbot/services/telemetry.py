@@ -179,6 +179,8 @@ class TelemetryService:
                 'targets': state.patrol_targets,
                 'detect_count': state.patrol_detect_count,
                 'last_detected': state.patrol_last_detected,
+                'last_event': state.patrol_last_event,
+                'event_count': state.patrol_event_count,
                 'metrics': state.patrol_metrics,
                 'disable_reason': state.patrol_disable_reason,
                 'last_error': state.patrol_last_error,
