@@ -28,4 +28,8 @@ window.patrolbotApi = {
   savePatrolConfig: async(payload)=> (await fetch('/api/patrol/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json(),
   enablePatrol: async()=> (await fetch('/api/patrol/enable',{method:'POST'})).json(),
   disablePatrol: async()=> (await fetch('/api/patrol/disable',{method:'POST'})).json(),
+  getVisionConfig: async()=> (await fetch('/api/vision/config')).json(),
+  saveVisionConfig: async(payload)=> (await fetch('/api/vision/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vision:payload})})).json(),
+  enableVision: async()=> (await fetch('/api/vision/enable',{method:'POST'})).json(),
+  disableVision: async()=> (await fetch('/api/vision/disable',{method:'POST'})).json(),
 };

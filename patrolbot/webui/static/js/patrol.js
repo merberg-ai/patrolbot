@@ -72,8 +72,8 @@ async function loadConfigs(){
     applyPatrolConfig(pdata.config || {});
     if(pmsg) pmsg.textContent = 'Patrol config loaded.';
     
-    // Check if vision is available via standard fetch wrapper
-    const vdata = await fetch('/api/vision/config').then(r => r.json());
+    // Use the central API wrapper
+    const vdata = await window.patrolbotApi.getVisionConfig();
     applyVisionConfig(vdata.config || {});
     if(vmsg) vmsg.textContent = 'Vision config loaded.';
   }catch(err){
@@ -136,11 +136,7 @@ async function saveVisionConfig(){
   const msg = document.getElementById('vision-message');
   try{
     const payload = visionPayloadFromForm();
-    await fetch('/api/vision/config', {
-       method: 'POST',
-       headers: {'Content-Type': 'application/json'},
-       body: JSON.stringify({ vision: payload })
-    }).then(r => r.json());
+    await window.patrolbotApi.saveVisionConfig(payload);
     if(msg) msg.textContent = 'Vision config saved.';
     setActionMessage('Vision config saved.', 'success');
     patrolLog('Vision config saved.');
@@ -177,13 +173,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
         setActionMessage('Patrol enabled.', 'success');
         
         // Ensure vision stream gets started if not on
-        fetch('/api/vision/enable', {method: 'POST'}).catch(()=>{});
+        window.patrolbotState?.refreshTimer && window.patrolbotApi.enableVision().catch(()=>{});
       }
       refreshPatrolState();
       refreshStatus().catch(()=>{});
     }catch(err){
       patrolLog(enabledNow ? 'Failed to disable patrol.' : 'Failed to enable patrol.');
-      setActionMessage(enabledNow ? 'Failed to disable patrol.', 'error');
+      setActionMessage(enabledNow ? 'Failed to disable patrol.' : 'Failed to enable patrol.', 'error');
     }
   });
 
