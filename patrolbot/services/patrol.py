@@ -208,6 +208,47 @@ class PatrolService:
         except Exception:
             return None
 
+    def _get_yolo_obstacle(self) -> dict | None:
+        if not self.runtime.state.tracking_enabled:
+            return None
+        tracking = getattr(self.runtime, 'tracking', None)
+        if not tracking:
+            return None
+        detections = getattr(tracking, '_latest_detections', [])
+        if not detections:
+            return None
+
+        frame_size = self.runtime.state.tracking_frame_size or (640, 480)
+        frame_area = max(1, frame_size[0] * frame_size[1])
+        frame_w = max(1, frame_size[0])
+
+        obstacles = []
+        for det in detections:
+            area_ratio = getattr(det, 'area', 0) / frame_area
+            center_x = getattr(det, 'center_x', frame_w / 2.0)
+            center_ratio = center_x / frame_w
+
+            if area_ratio > 0.05:
+                pan = self.runtime.state.pan_angle
+                if pan > 105:
+                    is_right, is_left = False, True
+                elif pan < 75:
+                    is_right, is_left = True, False
+                else:
+                    is_right = center_ratio > 0.6
+                    is_left = center_ratio < 0.4
+
+                obstacles.append({
+                    'area_ratio': area_ratio,
+                    'is_right': is_right,
+                    'is_left': is_left,
+                })
+
+        if not obstacles:
+            return None
+
+        return max(obstacles, key=lambda o: o['area_ratio'])
+
     def _reverse_once(self):
         motors = self.runtime.registry.motors
         if not motors:
@@ -304,7 +345,32 @@ class PatrolService:
                     continue
 
             try:
-                if distance is not None and 0 < distance < self._config.get('avoidance_distance_cm', 30):
+                yolo_obs = self._get_yolo_obstacle()
+                
+                hard_obstacle = False
+                soft_obstacle_dir = None
+                avoid_dist = self._config.get('avoidance_distance_cm', 30)
+
+                if distance is not None:
+                    if distance < avoid_dist:
+                        hard_obstacle = True
+                    elif distance < avoid_dist * 1.8:
+                        soft_obstacle_dir = self._last_turn
+
+                if yolo_obs:
+                    if yolo_obs['area_ratio'] > 0.25:
+                        hard_obstacle = True
+                        if not soft_obstacle_dir:
+                            soft_obstacle_dir = 'left' if yolo_obs['is_right'] else 'right'
+                    else:
+                        if yolo_obs['is_right']:
+                            soft_obstacle_dir = 'left'
+                        elif yolo_obs['is_left']:
+                            soft_obstacle_dir = 'right'
+                        elif not soft_obstacle_dir:
+                            soft_obstacle_dir = self._last_turn
+
+                if hard_obstacle:
                     state.patrol_metrics['obstacle_count'] = int(state.patrol_metrics.get('obstacle_count', 0)) + 1
                     state.patrol_drive_state = 'obstacle_detected'
                     motors.stop()
@@ -326,16 +392,30 @@ class PatrolService:
                         continue
 
                     self._reverse_once()
-                    direction = self._choose_turn_direction()
+                    direction = soft_obstacle_dir or self._choose_turn_direction()
                     self._turn_once(direction)
                     state.patrol_drive_state = 'recovering'
                     time.sleep(0.15)
                 else:
                     self._consecutive_blocks = 0
                     if state.patrol_drive_state != 'forward':
-                        steering.center()
-                        state.steering_angle = steering.angle
                         state.patrol_drive_state = 'forward'
+
+                    if soft_obstacle_dir == 'left':
+                        steering.left()
+                    elif soft_obstacle_dir == 'right':
+                        steering.right()
+                    else:
+                        ang = steering.angle
+                        cen = steering.center_angle
+                        if ang > cen + 2:
+                            steering.set_angle(ang - 2)
+                        elif ang < cen - 2:
+                            steering.set_angle(ang + 2)
+                        else:
+                            steering.center()
+                    state.steering_angle = steering.angle
+
                     motors.forward(self._config.get('speed', 35))
                     state.motor_state = motors.state
                     state.speed = motors.speed
