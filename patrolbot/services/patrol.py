@@ -238,9 +238,9 @@ class PatrolService:
             if area_ratio > 0.05:
                 pan = self.runtime.state.pan_angle
                 if pan > 105:
-                    is_right, is_left = False, True
-                elif pan < 75:
                     is_right, is_left = True, False
+                elif pan < 75:
+                    is_right, is_left = False, True
                 else:
                     is_right = center_ratio > 0.6
                     is_left = center_ratio < 0.4

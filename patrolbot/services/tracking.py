@@ -120,6 +120,7 @@ class TrackingService:
         self._mjpeg_clients = 0
         self._mjpeg_clients_lock = threading.Lock()
         self._cv_ok = self._check_cv()
+        self._patrol_detector = None
         self._sync_state_basics()
         self._apply_startup_safety()
 
@@ -879,13 +880,26 @@ class TrackingService:
                         cfg.get('detector') == 'motion' and
                         (time.time() - self._last_move_ts) < float(cfg.get('servo_idle_hold_s', 0.35))
                     )
-                    detections = [] if suppress_motion else self._detector.detect(frame)
+                    
+                    if patrol_enabled and not tracking_active:
+                        if self._patrol_detector is None:
+                            patrol_cfg = dict(self._config)
+                            patrol_cfg['enable_yolo'] = True
+                            patrol_cfg['yolo_classes'] = []   # override any classes so it detects all possible obstacles
+                            self._patrol_detector = build_detector('yolo', patrol_cfg)
+                        
+                        detections = self._patrol_detector.detect(frame)
+                        self.runtime.state.tracking_detector_available = bool(self._patrol_detector.is_available())
+                        self.runtime.state.tracking_detector_status = self._patrol_detector.status()
+                    else:
+                        detections = [] if suppress_motion else self._detector.detect(frame)
+                        self.runtime.state.tracking_detector_available = bool(self._detector.is_available())
+                        self.runtime.state.tracking_detector_status = self.get_detector_status()
+                    
                     target = self._choose_target(detections, frame.shape[1], frame.shape[0])
                     self._latest_detections = detections
                     self._latest_target = target
                     self.runtime.state.tracking_last_detection_count = len(detections)
-                    self.runtime.state.tracking_detector_available = bool(self._detector.is_available())
-                    self.runtime.state.tracking_detector_status = self.get_detector_status()
                     self.runtime.state.tracking_detector_details = self.get_detector_details()
                     if target:
                         self._last_seen_ts = time.time()
