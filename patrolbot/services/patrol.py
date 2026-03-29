@@ -28,6 +28,12 @@ class PatrolService:
         'action_on_detect': 'follow',  # 'follow', 'log', 'ignore'
         'target_classes': ['person', 'dog', 'cat'],
         'save_screenshots': True,
+        'obstacle_classes': ['chair', 'couch', 'table', 'dining table', 'potted plant', 'tv', 'bench'],
+        'log_only_classes': [],
+        'target_min_area_ratio': 0.01,
+        'obstacle_min_area_ratio': 0.05,
+        'follow_obstacle_steer_bias': 0.18,
+        'follow_reacquire_hold_s': 0.75,
         
         # Follow Mode PID Configuration
         'follow_target_distance_cm': 60,
@@ -97,8 +103,24 @@ class PatrolService:
             cfg['target_classes'] = [x.strip().lower() for x in raw_classes.split(',') if x.strip()]
         else:
             cfg['target_classes'] = [str(x).lower() for x in raw_classes]
-            
+
+        raw_obstacle_classes = cfg.get('obstacle_classes', [])
+        if isinstance(raw_obstacle_classes, str):
+            cfg['obstacle_classes'] = [x.strip().lower() for x in raw_obstacle_classes.split(',') if x.strip()]
+        else:
+            cfg['obstacle_classes'] = [str(x).lower() for x in raw_obstacle_classes if str(x).strip()]
+
+        raw_log_only_classes = cfg.get('log_only_classes', [])
+        if isinstance(raw_log_only_classes, str):
+            cfg['log_only_classes'] = [x.strip().lower() for x in raw_log_only_classes.split(',') if x.strip()]
+        else:
+            cfg['log_only_classes'] = [str(x).lower() for x in raw_log_only_classes if str(x).strip()]
+
         cfg['save_screenshots'] = bool(cfg.get('save_screenshots', True))
+        cfg['target_min_area_ratio'] = max(0.0, min(1.0, float(cfg.get('target_min_area_ratio', 0.01))))
+        cfg['obstacle_min_area_ratio'] = max(0.0, min(1.0, float(cfg.get('obstacle_min_area_ratio', 0.05))))
+        cfg['follow_obstacle_steer_bias'] = max(0.0, min(1.0, float(cfg.get('follow_obstacle_steer_bias', 0.18))))
+        cfg['follow_reacquire_hold_s'] = max(0.0, min(5.0, float(cfg.get('follow_reacquire_hold_s', 0.75))))
         cfg['follow_target_distance_cm'] = max(10, int(cfg.get('follow_target_distance_cm', 60)))
         cfg['follow_stop_distance_cm'] = max(5, int(cfg.get('follow_stop_distance_cm', 25)))
         cfg['follow_drive_speed'] = max(0, min(100, int(cfg.get('follow_drive_speed', 30))))
@@ -119,6 +141,8 @@ class PatrolService:
         state.patrol_speed = self._config.get('speed', 35)
         state.patrol_mode = getattr(self, '_behavior_state', 'patrol')
         state.patrol_targets = self._config.get('target_classes', [])
+        state.patrol_obstacles = self._config.get('obstacle_classes', [])
+        state.patrol_log_only = self._config.get('log_only_classes', [])
         metrics = state.patrol_metrics if isinstance(state.patrol_metrics, dict) else {}
         metrics.setdefault('last_distance_cm', None)
         metrics.setdefault('last_rear_distance_cm', None)
@@ -148,12 +172,17 @@ class PatrolService:
         return payload
 
     def _vision_patch_for_patrol(self) -> dict:
-        classes = [str(x).lower() for x in (self._config.get('target_classes') or []) if str(x).strip()]
+        wanted = []
+        for bucket in ('target_classes', 'obstacle_classes', 'log_only_classes'):
+            for item in (self._config.get(bucket) or []):
+                label = str(item).strip().lower()
+                if label and label not in wanted:
+                    wanted.append(label)
         return {
             'enabled': True,
             'enable_yolo': True,
             'detector': 'yolo',
-            'yolo_classes': classes,
+            'yolo_classes': wanted,
         }
 
     def _ensure_patrol_vision(self):
@@ -309,6 +338,48 @@ class PatrolService:
         except Exception:
             return None
 
+    def _frame_size(self):
+        frame_size = self.runtime.state.vision_frame_size or (640, 480)
+        if isinstance(frame_size, dict):
+            return int(frame_size.get('width', 640)), int(frame_size.get('height', 480))
+        return int(frame_size[0]), int(frame_size[1])
+
+    def _detection_area_ratio(self, det, frame_w: int, frame_h: int) -> float:
+        area = float(getattr(det, 'area', getattr(det, 'w', 0) * getattr(det, 'h', 0)) or 0.0)
+        return area / max(1.0, float(frame_w * frame_h))
+
+    def _label_in(self, det, labels) -> bool:
+        label = str(getattr(det, 'label', '') or '').strip().lower()
+        return bool(label and label in set(labels or []))
+
+    def _get_detection_buckets(self):
+        target_classes = [str(x).lower() for x in (self._config.get('target_classes') or []) if str(x).strip()]
+        obstacle_classes = [str(x).lower() for x in (self._config.get('obstacle_classes') or []) if str(x).strip()]
+        log_only_classes = [str(x).lower() for x in (self._config.get('log_only_classes') or []) if str(x).strip()]
+        return target_classes, obstacle_classes, log_only_classes
+
+    def _select_loggable_target(self):
+        target_classes, _, log_only_classes = self._get_detection_buckets()
+        interesting = list(dict.fromkeys([*target_classes, *log_only_classes]))
+        if not interesting:
+            return None
+        frame_w, frame_h = self._frame_size()
+        min_area = float(self._config.get('target_min_area_ratio', 0.01))
+        detections = getattr(self.runtime.state, 'vision_detections', []) or []
+        candidates = []
+        for det in detections:
+            label = str(getattr(det, 'label', '') or '').lower()
+            if label not in interesting:
+                continue
+            area_ratio = self._detection_area_ratio(det, frame_w, frame_h)
+            if area_ratio < min_area:
+                continue
+            candidates.append((self._score_target(det, frame_w, frame_h), det))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+
     def _get_yolo_obstacle(self) -> dict | None:
         if not self.runtime.state.vision_enabled:
             return None
@@ -316,36 +387,39 @@ class PatrolService:
         if not detections:
             return None
 
-        frame_size = self.runtime.state.vision_frame_size or (640, 480)
-        frame_area = max(1, frame_size[0] * frame_size[1])
-        frame_w = max(1, frame_size[0])
+        frame_w, frame_h = self._frame_size()
+        min_area_ratio = float(self._config.get('obstacle_min_area_ratio', 0.05))
+        target_classes, obstacle_classes, _ = self._get_detection_buckets()
 
         obstacles = []
-        target_classes = self._config.get('target_classes', [])
         for det in detections:
-            if getattr(det, 'label', '') in target_classes:
-                continue # Target objects are NOT obstacles
-            
-            area_ratio = getattr(det, 'area', getattr(det, 'w', 0) * getattr(det, 'h', 0)) / frame_area
-            center_x = getattr(det, 'center_x', frame_w / 2.0)
-            center_ratio = center_x / frame_w
+            label = str(getattr(det, 'label', '') or '').lower()
+            if label in target_classes:
+                continue
+            if obstacle_classes and label not in obstacle_classes:
+                continue
 
-            if area_ratio > 0.05:
-                pan = self.runtime.state.pan_angle
-                if pan > 105:
-                    is_right, is_left = True, False
-                elif pan < 75:
-                    is_right, is_left = False, True
-                else:
-                    is_right = center_ratio > 0.6
-                    is_left = center_ratio < 0.4
+            area_ratio = self._detection_area_ratio(det, frame_w, frame_h)
+            if area_ratio < min_area_ratio:
+                continue
 
-                obstacles.append({
-                    'area_ratio': area_ratio,
-                    'is_right': is_right,
-                    'is_left': is_left,
-                    'label': getattr(det, 'label', 'unknown')
-                })
+            center_x = float(getattr(det, 'center_x', frame_w / 2.0))
+            center_ratio = center_x / max(1.0, frame_w)
+            pan = self.runtime.state.pan_angle
+            if pan > 105:
+                is_right, is_left = True, False
+            elif pan < 75:
+                is_right, is_left = False, True
+            else:
+                is_right = center_ratio > 0.6
+                is_left = center_ratio < 0.4
+
+            obstacles.append({
+                'area_ratio': area_ratio,
+                'is_right': is_right,
+                'is_left': is_left,
+                'label': label or 'unknown',
+            })
 
         if not obstacles:
             return None
@@ -474,21 +548,24 @@ class PatrolService:
         return score
 
     def _select_target(self):
-        target_classes = [str(x).lower() for x in (self._config.get('target_classes') or []) if str(x).strip()]
+        target_classes, _, _ = self._get_detection_buckets()
         if not target_classes:
             return None
-        frame_size = self.runtime.state.vision_frame_size or (640, 480)
-        frame_w, frame_h = int(frame_size[0]), int(frame_size[1])
+        frame_w, frame_h = self._frame_size()
+        min_area = float(self._config.get('target_min_area_ratio', 0.01))
         vision = getattr(self.runtime, 'vision', None)
         tracker_target = vision.get_latest_target() if vision and hasattr(vision, 'get_latest_target') else None
         candidates = []
         if tracker_target and str(getattr(tracker_target, 'label', '')).lower() in target_classes:
-            candidates.append(tracker_target)
+            if self._detection_area_ratio(tracker_target, frame_w, frame_h) >= min_area:
+                candidates.append(tracker_target)
         detections = vision.get_latest_detections() if vision and hasattr(vision, 'get_latest_detections') else getattr(self.runtime.state, 'vision_detections', [])
         for det in detections or []:
             if str(getattr(det, 'label', '')).lower() in target_classes:
-                candidates.append(det)
+                if self._detection_area_ratio(det, frame_w, frame_h) >= min_area:
+                    candidates.append(det)
         if not candidates:
+            self.runtime.state.patrol_metrics['last_target_score'] = None
             return None
         scored = [(self._score_target(det, frame_w, frame_h), det) for det in candidates]
         scored.sort(key=lambda item: item[0], reverse=True)
@@ -631,6 +708,13 @@ class PatrolService:
              norm_err = err_x / max(1.0, frame_w / 2.0)
              steer_range = float((max_a - center) if norm_err >= 0 else (center - min_a))
              target_angle = float(center + (norm_err * steer_range * steer_gain))
+             obstacle = self._front_obstacle_info(distance, target=target)
+             soft_dir = obstacle.get('soft_dir')
+             bias = float(cfg.get('follow_obstacle_steer_bias', 0.18)) * float(max_a - min_a)
+             if soft_dir == 'left':
+                 target_angle -= bias
+             elif soft_dir == 'right':
+                 target_angle += bias
              target_angle = max(float(min_a), min(float(max_a), target_angle))
              
              if self._last_steer_angle is None:
@@ -669,9 +753,17 @@ class PatrolService:
             if drive_state == 'forward':
                 motors.forward(speed)
             elif drive_state == 'backward':
-                motors.backward(speed - 5)
+                rear_dist = self._measure_rear_distance()
+                self.runtime.state.patrol_metrics['last_rear_distance_cm'] = rear_dist
+                if rear_dist is not None and rear_dist < 15.0:
+                    drive_state = 'stopped'
+                    motors.stop()
+                else:
+                    motors.backward(max(0, speed - 5))
             else:
                 motors.stop()
+
+            self.runtime.state.patrol_drive_state = 'following_' + drive_state
                 
             self.runtime.state.motor_state = motors.state
             self.runtime.state.speed = motors.speed
@@ -781,13 +873,18 @@ class PatrolService:
                     state.patrol_metrics['obstacle_clear_age_s'] = round(max(0.0, now - self._obstacle_clear_since), 2)
                 else:
                     state.patrol_metrics['obstacle_clear_age_s'] = None
+                state.patrol_metrics['current_target_label'] = getattr(target, 'label', None) if target else None
 
                 obstacle = self._front_obstacle_info(distance, target=target)
+                state.patrol_metrics['current_obstacle_label'] = obstacle.get('label') if obstacle else None
                 acquire_frames = int(self._config.get('acquire_confirm_frames', 3))
                 lost_timeout = float(self._config.get('lost_timeout_s', 1.5))
                 obstacle_hold = float(self._config.get('obstacle_hold_time_s', 0.5))
+                reacquire_hold = float(self._config.get('follow_reacquire_hold_s', 0.75))
                 target_confirmed = bool(target and self._target_seen_streak >= acquire_frames)
                 target_recent = bool(self._last_target_signature and (now - self._last_target_ts) <= lost_timeout)
+                log_target = self._select_loggable_target()
+                log_confirmed = bool(log_target and ((str(getattr(log_target, 'label', '')).lower() in (self._config.get('log_only_classes') or [])) or action == 'log'))
 
                 if obstacle.get('hard'):
                     self._obstacle_clear_since = None
@@ -795,7 +892,7 @@ class PatrolService:
                 elif action == 'follow' and (target_confirmed or (target and target_recent)):
                     if self._obstacle_clear_since is None:
                         self._obstacle_clear_since = now
-                    if (now - self._obstacle_clear_since) < obstacle_hold and self._behavior_state in {'avoid_front', 'recovering'}:
+                    if self._behavior_state in {'avoid_front', 'recovering'} and (now - self._obstacle_clear_since) < max(obstacle_hold, reacquire_hold):
                         self._set_behavior_state('recovering')
                         self.runtime.state.patrol_drive_state = 'recovering'
                         self._stop_motion()
@@ -803,9 +900,9 @@ class PatrolService:
                     else:
                         self._obstacle_clear_since = now
                         self._follow_target(target, distance)
-                elif target and action == 'log' and self._target_seen_streak >= acquire_frames:
-                    self._set_behavior_state('investigate', label=getattr(target, 'label', None))
-                    self._log_target(target)
+                elif log_target and (log_confirmed or (action == 'log' and self._target_seen_streak >= acquire_frames)):
+                    self._set_behavior_state('investigate', label=getattr(log_target, 'label', None))
+                    self._log_target(log_target)
                 else:
                     if self._last_target_signature and not target_recent:
                         self._record_event('target_lost')

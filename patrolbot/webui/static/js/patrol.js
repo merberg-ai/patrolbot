@@ -27,8 +27,24 @@ function applyPatrolConfig(cfg){
      const classes = Array.isArray(cfg.target_classes) ? cfg.target_classes.join(', ') : String(cfg.target_classes);
      set('patrol-target-classes', classes);
   }
+  if (cfg.obstacle_classes) {
+     const classes = Array.isArray(cfg.obstacle_classes) ? cfg.obstacle_classes.join(', ') : String(cfg.obstacle_classes);
+     set('patrol-obstacle-classes', classes);
+  }
+  if (cfg.log_only_classes) {
+     const classes = Array.isArray(cfg.log_only_classes) ? cfg.log_only_classes.join(', ') : String(cfg.log_only_classes);
+     set('patrol-log-only-classes', classes);
+  }
   set('patrol-action-on-detect', cfg.action_on_detect);
   setChecked('patrol-save-screenshots', cfg.save_screenshots);
+  set('patrol-target-min-area', cfg.target_min_area_ratio);
+  set('patrol-obstacle-min-area', cfg.obstacle_min_area_ratio);
+  set('patrol-acquire-frames', cfg.acquire_confirm_frames);
+  set('patrol-lost-timeout', cfg.lost_timeout_s);
+  set('patrol-obstacle-hold', cfg.obstacle_hold_time_s);
+  set('patrol-log-cooldown', cfg.log_cooldown_sec);
+  set('patrol-reacquire-hold', cfg.follow_reacquire_hold_s);
+  set('patrol-follow-obstacle-bias', cfg.follow_obstacle_steer_bias);
 }
 
 function applyVisionConfig(cfg){
@@ -55,7 +71,17 @@ function patrolPayloadFromForm(){
     
     action_on_detect: document.getElementById('patrol-action-on-detect').value || 'follow',
     target_classes: document.getElementById('patrol-target-classes').value || '',
+    obstacle_classes: document.getElementById('patrol-obstacle-classes').value || '',
+    log_only_classes: document.getElementById('patrol-log-only-classes').value || '',
     save_screenshots: !!document.getElementById('patrol-save-screenshots').checked,
+    target_min_area_ratio: parseFloat(document.getElementById('patrol-target-min-area').value || '0.01'),
+    obstacle_min_area_ratio: parseFloat(document.getElementById('patrol-obstacle-min-area').value || '0.05'),
+    acquire_confirm_frames: parseInt(document.getElementById('patrol-acquire-frames').value || '3', 10),
+    lost_timeout_s: parseFloat(document.getElementById('patrol-lost-timeout').value || '1.5'),
+    obstacle_hold_time_s: parseFloat(document.getElementById('patrol-obstacle-hold').value || '0.5'),
+    log_cooldown_sec: parseFloat(document.getElementById('patrol-log-cooldown').value || '5'),
+    follow_reacquire_hold_s: parseFloat(document.getElementById('patrol-reacquire-hold').value || '0.75'),
+    follow_obstacle_steer_bias: parseFloat(document.getElementById('patrol-follow-obstacle-bias').value || '0.18'),
   };
 }
 
@@ -104,6 +130,7 @@ function renderPatrolState(state){
   
   setText('patrol-detect-count', state.detect_count != null ? String(state.detect_count) : '0');
   setText('patrol-last-target', state.last_detected || '--');
+  setText('patrol-current-obstacle', state.metrics && state.metrics.current_obstacle_label ? String(state.metrics.current_obstacle_label) : '--');
   
   setText('patrol-disable-reason', state.disable_reason || '--');
   setText('patrol-last-error', state.last_error || '--');
@@ -142,7 +169,11 @@ async function saveVisionConfig(){
     const patrolPayload = {
       action_on_detect: document.getElementById('patrol-action-on-detect').value || 'follow',
       target_classes: document.getElementById('patrol-target-classes').value || '',
+      obstacle_classes: document.getElementById('patrol-obstacle-classes').value || '',
+      log_only_classes: document.getElementById('patrol-log-only-classes').value || '',
       save_screenshots: !!document.getElementById('patrol-save-screenshots').checked,
+      target_min_area_ratio: parseFloat(document.getElementById('patrol-target-min-area').value || '0.01'),
+      obstacle_min_area_ratio: parseFloat(document.getElementById('patrol-obstacle-min-area').value || '0.05'),
     };
     await Promise.all([
       window.patrolbotApi.saveVisionConfig(visionPayload),

@@ -52,6 +52,8 @@ class RuntimeState:
     patrol_drive_state: str = 'idle'
     patrol_speed: int = 0
     patrol_targets: list[str] = field(default_factory=list)
+    patrol_obstacles: list[str] = field(default_factory=list)
+    patrol_log_only: list[str] = field(default_factory=list)
     patrol_detect_count: int = 0
     patrol_last_detected: str | None = None
     patrol_last_event: dict[str, Any] | None = None
