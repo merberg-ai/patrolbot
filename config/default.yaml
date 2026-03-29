@@ -178,6 +178,21 @@ patrol:
   scan_tilt_angle: 90
   memory_max_repeats: 3
   trapped_timeout_s: 10.0
+  action_on_detect: follow
+  target_classes: [person, dog, cat]
+  save_screenshots: true
+  follow_target_distance_cm: 60
+  follow_stop_distance_cm: 25
+  follow_drive_speed: 30
+  follow_steer_gain: 0.6
+  follow_steer_smoothing_alpha: 0.45
+  follow_pan_gain: 0.08
+  follow_use_ultrasonic: true
+  follow_image_size_ratio_target: 0.25
+  acquire_confirm_frames: 3
+  lost_timeout_s: 1.5
+  log_cooldown_sec: 5.0
+  obstacle_hold_time_s: 0.5
 snapshots:
   enabled: false
   directory: snapshots

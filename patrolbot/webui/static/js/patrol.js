@@ -24,7 +24,8 @@ function applyPatrolConfig(cfg){
   set('patrol-scan-tilt', cfg.scan_tilt_angle);
   
   if (cfg.target_classes) {
-     set('patrol-target-classes', cfg.target_classes.join(', '));
+     const classes = Array.isArray(cfg.target_classes) ? cfg.target_classes.join(', ') : String(cfg.target_classes);
+     set('patrol-target-classes', classes);
   }
   set('patrol-action-on-detect', cfg.action_on_detect);
   setChecked('patrol-save-screenshots', cfg.save_screenshots);
@@ -137,11 +138,19 @@ async function savePatrolConfig(){
 async function saveVisionConfig(){
   const msg = document.getElementById('vision-message');
   try{
-    const payload = visionPayloadFromForm();
-    await window.patrolbotApi.saveVisionConfig(payload);
-    if(msg) msg.textContent = 'Vision config saved.';
-    setActionMessage('Vision config saved.', 'success');
-    patrolLog('Vision config saved.');
+    const visionPayload = visionPayloadFromForm();
+    const patrolPayload = {
+      action_on_detect: document.getElementById('patrol-action-on-detect').value || 'follow',
+      target_classes: document.getElementById('patrol-target-classes').value || '',
+      save_screenshots: !!document.getElementById('patrol-save-screenshots').checked,
+    };
+    await Promise.all([
+      window.patrolbotApi.saveVisionConfig(visionPayload),
+      window.patrolbotApi.savePatrolConfig(patrolPayload),
+    ]);
+    if(msg) msg.textContent = 'Vision & targeting config saved.';
+    setActionMessage('Vision & targeting config saved.', 'success');
+    patrolLog('Vision & targeting config saved.');
   }catch(err){
     if(msg) msg.textContent = 'Failed to save vision config.';
     setActionMessage('Failed to save vision config.', 'error');

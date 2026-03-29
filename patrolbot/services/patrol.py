@@ -38,6 +38,10 @@ class PatrolService:
         'follow_pan_gain': 0.08,
         'follow_use_ultrasonic': True,
         'follow_image_size_ratio_target': 0.25,
+        'acquire_confirm_frames': 3,
+        'lost_timeout_s': 1.5,
+        'log_cooldown_sec': 5.0,
+        'obstacle_hold_time_s': 0.5,
     }
 
     def __init__(self, runtime, logger):
@@ -59,6 +63,9 @@ class PatrolService:
         self._last_target_signature = None
         self._last_target_ts = 0.0
         self._last_obstacle_label = None
+        self._behavior_state = 'patrol'
+        self._target_seen_streak = 0
+        self._obstacle_clear_since = None
         self._sync_state_basics()
 
     def _normalize(self, source: dict) -> dict:
@@ -100,13 +107,17 @@ class PatrolService:
         cfg['follow_pan_gain'] = max(0.0, min(2.0, float(cfg.get('follow_pan_gain', 0.08))))
         cfg['follow_use_ultrasonic'] = bool(cfg.get('follow_use_ultrasonic', True))
         cfg['follow_image_size_ratio_target'] = max(0.01, min(1.0, float(cfg.get('follow_image_size_ratio_target', 0.25))))
+        cfg['acquire_confirm_frames'] = max(1, min(20, int(cfg.get('acquire_confirm_frames', 3))))
+        cfg['lost_timeout_s'] = max(0.1, min(10.0, float(cfg.get('lost_timeout_s', 1.5))))
+        cfg['log_cooldown_sec'] = max(0.5, min(60.0, float(cfg.get('log_cooldown_sec', 5.0))))
+        cfg['obstacle_hold_time_s'] = max(0.0, min(5.0, float(cfg.get('obstacle_hold_time_s', 0.5))))
         return cfg
 
     def _sync_state_basics(self):
         state = self.runtime.state
         state.patrol_enabled = bool(self._config.get('enabled', False))
         state.patrol_speed = self._config.get('speed', 35)
-        state.patrol_mode = 'patrol'
+        state.patrol_mode = getattr(self, '_behavior_state', 'patrol')
         state.patrol_targets = self._config.get('target_classes', [])
         metrics = state.patrol_metrics if isinstance(state.patrol_metrics, dict) else {}
         metrics.setdefault('last_distance_cm', None)
@@ -118,6 +129,9 @@ class PatrolService:
         state.patrol_metrics = metrics
         state.patrol_last_event = state.patrol_last_event if isinstance(state.patrol_last_event, dict) else None
         state.patrol_recent_events = list(state.patrol_recent_events or [])[-25:]
+        metrics['target_seen_streak'] = int(metrics.get('target_seen_streak', 0) or 0)
+        metrics['target_lost_age_s'] = metrics.get('target_lost_age_s')
+        metrics['obstacle_clear_age_s'] = metrics.get('obstacle_clear_age_s')
 
     def get_config(self):
         return dict(self._config)
@@ -178,6 +192,7 @@ class PatrolService:
         self.runtime.state.mode = 'patrol'
         self.runtime.state.patrol_disable_reason = None
         self._ensure_patrol_vision()
+        self._set_behavior_state('patrol')
         self._record_event('patrol_enabled', targets=list(self._config.get('target_classes', [])))
         self.logger.info('Patrol enabled')
 
@@ -188,6 +203,7 @@ class PatrolService:
         self.runtime.state.mode = 'idle'
         self.runtime.state.patrol_drive_state = 'idle'
         self.runtime.state.patrol_disable_reason = reason
+        self._set_behavior_state('idle')
         self._record_event('patrol_disabled', reason=reason)
         self.logger.info('Patrol disabled: %s', reason)
 
@@ -337,6 +353,95 @@ class PatrolService:
         return max(obstacles, key=lambda o: o['area_ratio'])
 
 
+
+    def _set_behavior_state(self, state_name: str, **fields):
+        state_name = str(state_name or 'patrol').strip().lower()
+        previous = getattr(self, '_behavior_state', 'patrol')
+        self._behavior_state = state_name
+        self.runtime.state.patrol_mode = state_name
+        self.runtime.state.patrol_metrics['target_seen_streak'] = int(self._target_seen_streak or 0)
+        if previous != state_name:
+            self._record_event('state_changed', previous=previous, state=state_name, **fields)
+        return state_name
+
+    def _front_obstacle_info(self, distance, target=None):
+        avoid_dist = float(self._config.get('avoidance_distance_cm', 30))
+        yolo_obs = self._get_yolo_obstacle()
+        hard = False
+        soft_dir = None
+        label = None
+        area_ratio = None
+
+        if distance is not None:
+            if distance < avoid_dist:
+                hard = True
+                label = 'ultrasonic'
+            elif distance < avoid_dist * 1.8:
+                soft_dir = self._last_turn
+                label = label or 'ultrasonic_soft'
+
+        if yolo_obs:
+            area_ratio = round(float(yolo_obs.get('area_ratio', 0.0)), 3)
+            label = yolo_obs.get('label') or label
+            if area_ratio > 0.25:
+                hard = True
+                if not soft_dir:
+                    soft_dir = 'left' if yolo_obs['is_right'] else 'right'
+            else:
+                if yolo_obs['is_right']:
+                    soft_dir = 'left'
+                elif yolo_obs['is_left']:
+                    soft_dir = 'right'
+                elif not soft_dir:
+                    soft_dir = self._last_turn
+
+        return {
+            'hard': bool(hard),
+            'soft_dir': soft_dir,
+            'label': label,
+            'area_ratio': area_ratio,
+            'distance_cm': distance,
+        }
+
+    def _handle_hard_obstacle(self, obstacle):
+        state = self.runtime.state
+        motors = self.runtime.registry.motors
+        state.patrol_metrics['obstacle_count'] = int(state.patrol_metrics.get('obstacle_count', 0)) + 1
+        label = obstacle.get('label') or 'unknown'
+        if label != self._last_obstacle_label:
+            self._record_event('obstacle_detected', label=label, area_ratio=obstacle.get('area_ratio'), distance_cm=obstacle.get('distance_cm'))
+            self._last_obstacle_label = label
+        self._set_behavior_state('avoid_front', label=label)
+        state.patrol_drive_state = 'obstacle_detected'
+        if motors:
+            motors.stop()
+            state.motor_state = motors.state
+            state.speed = motors.speed
+        time.sleep(0.1)
+
+        now = time.monotonic()
+        if now - self._last_escape_ts < 3.0:
+            self._consecutive_blocks += 1
+        else:
+            self._consecutive_blocks = 1
+        self._last_escape_ts = now
+        self._obstacle_clear_since = None
+
+        if self._consecutive_blocks > self._config.get('memory_max_repeats', 3):
+            self.logger.warning('Consecutive blocks max reached (%d), entered trapped state', self._consecutive_blocks)
+            self._set_behavior_state('trapped', repeats=self._consecutive_blocks)
+            self._record_event('trapped_entered', repeats=self._consecutive_blocks)
+            state.patrol_drive_state = 'trapped'
+            self._stop_motion()
+            return
+
+        self._reverse_once()
+        direction = obstacle.get('soft_dir') or self._choose_turn_direction()
+        self._turn_once(direction)
+        self._set_behavior_state('recovering', direction=direction)
+        state.patrol_drive_state = 'recovering'
+        time.sleep(0.15)
+
     def _target_signature(self, target):
         return (
             getattr(target, 'label', 'unknown'),
@@ -467,7 +572,7 @@ class PatrolService:
         self.runtime.state.patrol_detect_count += 1
 
         now = time.time()
-        if (now - self._last_log_ts) < 5.0:
+        if (now - self._last_log_ts) < float(self._config.get('log_cooldown_sec', 5.0)):
             return
         self._last_log_ts = now
 
@@ -497,6 +602,7 @@ class PatrolService:
         if not target:
             return
 
+        self._set_behavior_state('follow', label=getattr(target, 'label', None))
         self.runtime.state.patrol_drive_state = 'following'
         self.runtime.state.patrol_last_detected = target.label
         
@@ -576,69 +682,18 @@ class PatrolService:
          state = self.runtime.state
          motors = self.runtime.registry.motors
          steering = self.runtime.registry.steering
-         
-         yolo_obs = self._get_yolo_obstacle()
-         
-         hard_obstacle = False
-         soft_obstacle_dir = None
-         avoid_dist = self._config.get('avoidance_distance_cm', 30)
 
-         if distance is not None:
-             if distance < avoid_dist:
-                 hard_obstacle = True
-             elif distance < avoid_dist * 1.8:
-                 soft_obstacle_dir = self._last_turn
-
-         if yolo_obs:
-             if yolo_obs['area_ratio'] > 0.25:
-                 hard_obstacle = True
-                 if not soft_obstacle_dir:
-                     soft_obstacle_dir = 'left' if yolo_obs['is_right'] else 'right'
-             else:
-                 if yolo_obs['is_right']:
-                     soft_obstacle_dir = 'left'
-                 elif yolo_obs['is_left']:
-                     soft_obstacle_dir = 'right'
-                 elif not soft_obstacle_dir:
-                     soft_obstacle_dir = self._last_turn
+         obstacle = self._front_obstacle_info(distance)
+         hard_obstacle = bool(obstacle.get('hard'))
+         soft_obstacle_dir = obstacle.get('soft_dir')
 
          if hard_obstacle:
-             state.patrol_metrics['obstacle_count'] = int(state.patrol_metrics.get('obstacle_count', 0)) + 1
-             if yolo_obs and self._last_obstacle_label != yolo_obs.get('label'):
-                 self._record_event('obstacle_detected', label=yolo_obs.get('label'), area_ratio=round(float(yolo_obs.get('area_ratio', 0.0)), 3), distance_cm=distance)
-                 self._last_obstacle_label = yolo_obs.get('label')
-             elif distance is not None and self._last_obstacle_label != 'ultrasonic':
-                 self._record_event('obstacle_detected', label='ultrasonic', distance_cm=distance)
-                 self._last_obstacle_label = 'ultrasonic'
-             state.patrol_drive_state = 'obstacle_detected'
-             if motors:
-                motors.stop()
-                state.motor_state = motors.state
-                state.speed = motors.speed
-             time.sleep(0.1)
-
-             now = time.monotonic()
-             if now - self._last_escape_ts < 3.0:
-                 self._consecutive_blocks += 1
-             else:
-                 self._consecutive_blocks = 1
-             self._last_escape_ts = now
-
-             if self._consecutive_blocks > self._config.get('memory_max_repeats', 3):
-                 self.logger.warning('Consecutive blocks max reached (%d), entered trapped state', self._consecutive_blocks)
-                 self._record_event('trapped_entered', repeats=self._consecutive_blocks)
-                 state.patrol_drive_state = 'trapped'
-                 self._stop_motion()
-                 return # Exit frame
-
-             self._reverse_once()
-             direction = soft_obstacle_dir or self._choose_turn_direction()
-             self._turn_once(direction)
-             state.patrol_drive_state = 'recovering'
-             time.sleep(0.15)
+             self._handle_hard_obstacle(obstacle)
          else:
              self._consecutive_blocks = 0
              self._last_obstacle_label = None
+             self._obstacle_clear_since = self._obstacle_clear_since or time.monotonic()
+             self._set_behavior_state('patrol')
              if state.patrol_drive_state != 'forward':
                  state.patrol_drive_state = 'forward'
 
@@ -663,7 +718,7 @@ class PatrolService:
                  state.motor_state = motors.state
                  state.speed = motors.speed
              time.sleep(0.05)
-             
+
          self._update_scan()
 
     def _loop(self):
@@ -703,26 +758,59 @@ class PatrolService:
 
             try:
                 self._ensure_patrol_vision()
-                target = self._select_target()
                 action = self._config.get('action_on_detect', 'follow')
+                target = self._select_target()
+                now = time.monotonic()
 
                 if target:
+                    self._target_seen_streak += 1
                     sig = self._target_signature(target)
                     if sig != self._last_target_signature:
                         self._record_event('target_acquired', label=target.label, confidence=round(float(getattr(target, 'confidence', 1.0) or 1.0), 3))
                     self._last_target_signature = sig
-                    self._last_target_ts = time.monotonic()
+                    self._last_target_ts = now
+                else:
+                    self._target_seen_streak = 0
 
-                if target and action == 'follow':
-                    self._follow_target(target, distance)
-                elif target and action == 'log':
+                state.patrol_metrics['target_seen_streak'] = int(self._target_seen_streak)
+                if self._last_target_signature:
+                    state.patrol_metrics['target_lost_age_s'] = round(max(0.0, now - self._last_target_ts), 2)
+                else:
+                    state.patrol_metrics['target_lost_age_s'] = None
+                if self._obstacle_clear_since is not None:
+                    state.patrol_metrics['obstacle_clear_age_s'] = round(max(0.0, now - self._obstacle_clear_since), 2)
+                else:
+                    state.patrol_metrics['obstacle_clear_age_s'] = None
+
+                obstacle = self._front_obstacle_info(distance, target=target)
+                acquire_frames = int(self._config.get('acquire_confirm_frames', 3))
+                lost_timeout = float(self._config.get('lost_timeout_s', 1.5))
+                obstacle_hold = float(self._config.get('obstacle_hold_time_s', 0.5))
+                target_confirmed = bool(target and self._target_seen_streak >= acquire_frames)
+                target_recent = bool(self._last_target_signature and (now - self._last_target_ts) <= lost_timeout)
+
+                if obstacle.get('hard'):
+                    self._obstacle_clear_since = None
+                    self._handle_hard_obstacle(obstacle)
+                elif action == 'follow' and (target_confirmed or (target and target_recent)):
+                    if self._obstacle_clear_since is None:
+                        self._obstacle_clear_since = now
+                    if (now - self._obstacle_clear_since) < obstacle_hold and self._behavior_state in {'avoid_front', 'recovering'}:
+                        self._set_behavior_state('recovering')
+                        self.runtime.state.patrol_drive_state = 'recovering'
+                        self._stop_motion()
+                        time.sleep(0.05)
+                    else:
+                        self._obstacle_clear_since = now
+                        self._follow_target(target, distance)
+                elif target and action == 'log' and self._target_seen_streak >= acquire_frames:
+                    self._set_behavior_state('investigate', label=getattr(target, 'label', None))
                     self._log_target(target)
                 else:
-                    if self._last_target_signature and (time.monotonic() - self._last_target_ts) > 1.5:
+                    if self._last_target_signature and not target_recent:
                         self._record_event('target_lost')
                         self._last_target_signature = None
                     self._patrol_drive(distance)
-                    
             except RuntimeError as exc:
                 state.patrol_last_error = str(exc)
                 state.patrol_drive_state = 'locked'
